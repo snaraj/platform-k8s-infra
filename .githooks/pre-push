@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Author branch pushes only. Main and remote ref lifecycle remain owner work.
+set -euo pipefail
+[[ "${1:-}" == origin ]]
+case "${2:-}" in
+  https://github.com/snaraj/platform-k8s-infra.git|git@github.com:snaraj/platform-k8s-infra.git) ;;
+  *) exit 1 ;;
+esac
+root="$(git rev-parse --show-toplevel)"
+[[ -z "$(git status --porcelain=v1 --untracked-files=normal)" ]]
+python3 -I -B "$root/scripts/publication.py" --identity
+updates=0
+while read -r local_ref head remote_ref before; do
+  updates=$((updates + 1))
+  [[ "$updates" == 1 && "$local_ref" == refs/heads/* && "$local_ref" == "$remote_ref" ]]
+  [[ "$remote_ref" != refs/heads/main && "$head" =~ ^[0-9a-f]{40}$ && "$head" != "0000000000000000000000000000000000000000" ]]
+  [[ "$head" == "$(git rev-parse HEAD)" && "$local_ref" == "$(git symbolic-ref HEAD)" ]]
+  advertised="$(git ls-remote --exit-code "${2}" refs/heads/main)"
+  [[ "$advertised" != *$'\n'* ]]
+  IFS=$'\t' read -r base name extra <<< "$advertised"
+  [[ "$base" =~ ^[0-9a-f]{40}$ && "$name" == refs/heads/main && -z "${extra:-}" ]]
+  [[ "$before" =~ ^[0-9a-f]{40}$ ]]
+  if [[ "$before" != "0000000000000000000000000000000000000000" ]]; then
+    git merge-base --is-ancestor "$before" "$head"
+  fi
+  python3 -I -B "$root/scripts/publication.py" --secrets "$base" "$head"
+done
+[[ "$updates" == 1 ]]

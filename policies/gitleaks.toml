@@ -1,0 +1,51 @@
+title = "application composition secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "age-private-identity"
+description = "classical and post-quantum age private identities must never enter Git"
+regex = '''AGE-SECRET-KEY-(?:PQ-)?1[A-Z0-9]+'''
+keywords = ["AGE-SECRET-KEY-"]
+
+[[rules]]
+id = "prefixed-cloudflare-api-credential"
+description = "Current prefixed Cloudflare API credentials must never enter Git"
+regex = '''\b(?:cfk|cfut|cfat)_[A-Za-z0-9]{40}[0-9A-Fa-f]{8}\b'''
+keywords = ["cfk_", "cfut_", "cfat_"]
+
+[[rules]]
+id = "literal-cloudflare-api-token"
+description = "Legacy Cloudflare tokens require contextual detection"
+regex = '''(?i)\bcloudflare_api_token\b["']?\s*[:=]\s*["']?[A-Za-z0-9_+/-]{20,}["']?'''
+keywords = ["cloudflare_api_token"]
+
+[[rules]]
+id = "cloudflare-bearer-credential"
+description = "Bearer credentials must never be embedded in request material"
+regex = '''(?i)\bauthorization\b["']?\s*:\s*["']?bearer\s+[A-Za-z0-9._~+/-]{20,}'''
+keywords = ["authorization", "bearer"]
+
+[[rules]]
+id = "cloudflare-tunnel-runtime-token"
+description = "Cloudflare Tunnel runtime bearer tokens must remain outside Git"
+regex = '''(?i)\b(?:cloudflared[_ -]?)?tunnel[_ -]?token\b["']?\s*[:=]\s*["']?(?:eyJ[A-Za-z0-9+/]{20,}={0,2}|[A-Za-z0-9_+/-]{80,})["']?'''
+keywords = ["tunnel_token", "tunnel-token", "tunnel token"]
+
+[[rules]]
+id = "bare-cloudflare-tunnel-runtime-token"
+description = "Cloudflare Tunnel runtime tokens are forbidden even without a label"
+regex = '''eyJ[A-Za-z0-9+/]{77,}={0,2}'''
+
+[[rules]]
+id = "private-key-pem-block"
+description = "Every PEM private-key family is forbidden"
+regex = '''-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----'''
+keywords = ["PRIVATE KEY"]
+
+[[rules]]
+id = "kubernetes-api-encryption-secretbox-key"
+description = "Plaintext Kubernetes API-server secretbox keys must never enter Git"
+regex = '''(?im)^[ \t]*(?:"secret"|'secret'|secret)[ \t]*:[ \t]*["']?[A-Za-z0-9+/]{43}=["']?[ \t]*(?:#.*)?$'''
+keywords = ["secret"]
