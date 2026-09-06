@@ -46,5 +46,6 @@ PR jobs are secretless with read-only default permissions, pinned actions and
 tools, disabled checkout credential persistence, and GitHub-hosted runners.
 Required checks validate manifest boundaries, acquired artifact identities,
 history and privacy. No source-release publisher or cluster credential belongs
-here. Do not claim this initial scaffold is deployable until its independent
-acquisition verifier, CI and repository protections have been validated.
+here. Source activation requires current proof that acquisition verification,
+CI and repository protections pass. Repository content alone does not prove
+live reconciliation or workload health.
