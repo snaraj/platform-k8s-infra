@@ -1,0 +1,10 @@
+{
+  "kubernetes/websites/lidersea-com/default-deny.yaml": "1de865e81ef625ee49103a12034bbb2c2b44626d0e9d112656a8cf11b1f04652",
+  "kubernetes/websites/lidersea-com/kustomization.yaml": "0842bdd52c4b1c760c80fa8e274fec277bfecb7e2e2e4d410b01b158575f7d54",
+  "kubernetes/websites/lidersea-com/release.yaml": "9b7c6f91196b6625162e13da7d7746861505d5d1b08550ecf190e8fcb6f2bdb1",
+  "kubernetes/websites/lidersea-com/source.yaml": "8358397999e16639b5df6d9cd208d5eefe02c57bdbb92d17bb97f01931f0b817",
+  "kubernetes/websites/naranjo-online/default-deny.yaml": "38b68324cfd4c0c3879774458e4e1fa2d55d00081b87cc7fbd97cb9e865cc5e2",
+  "kubernetes/websites/naranjo-online/kustomization.yaml": "0842bdd52c4b1c760c80fa8e274fec277bfecb7e2e2e4d410b01b158575f7d54",
+  "kubernetes/websites/naranjo-online/release.yaml": "7d13f40b1d8c5ff80f2809d9d3cceddf3a39b5826481332d0a5085b9b3e380b6",
+  "kubernetes/websites/naranjo-online/source.yaml": "71983719e9714a100d6d5f5b782877a266d9997990a73dae76c4693e7af9ee73"
+}

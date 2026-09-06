@@ -1,0 +1,67 @@
+# naranjo.online's Helm chart is published as a signed OCI artifact by that
+# site's own release publisher. The immutable manifest digest below is the
+# only selector source-controller consumes; the release annotation is the
+# reviewed human label whose tag-to-digest mapping was independently resolved.
+#
+# The chart VERSION and the SIGNING REF are two different things. The version
+# is audit metadata; the signature is minted by a
+# workflow_dispatch run of the publisher selected from that repository's
+# protected `main` branch, which its own reviewed release contract enforces, so
+# the certificate identity ends in @refs/heads/main. That ref is the stronger
+# anchor: a run at a ref executes the workflow definition AT that ref, and
+# `refs/heads/main` is the only ref in that repository whose creation and
+# update are gated by a ruleset with no bypass actors. Tag creation is not
+# restricted there, so a tag-ref identity would be mintable by any holder of
+# `contents: write` (ADR 0016 amendment 2026-08-22).
+#
+# Fail-closed properties this object carries, none of which may be relaxed
+# without a reviewed decision:
+#
+#   * spec.verify is MANDATORY. source-controller refuses to produce an
+#     artifact for a chart that carries no cosign signature, or one signed by
+#     any identity other than THIS site's release-publisher workflow running on
+#     protected `main`. The subject pattern is anchored end to end so the
+#     sibling site's publisher, another workflow in the same repository, a run
+#     at any other ref — a tag ref included — and any look-alike host are all
+#     rejected: the two site identity tuples must never couple (AGENTS.md
+#     safety invariant 14).
+#   * spec.ref contains exactly one nonzero sha256 digest. Moving, deleting,
+#     or replacing a registry tag cannot change the bytes Flux selects. A new
+#     site release reaches the cluster only through a reviewed platform change
+#     that re-resolves the human tag and verifies the new digest and signer.
+#   * No secretRef, serviceAccountName, certSecretRef, or proxySecretRef: the
+#     registry is read anonymously and the cluster holds no registry
+#     credential, exactly as it holds no Git credential (ADR 0003, safety
+#     invariant 5).
+#   * The layer selector pins the Helm chart media type, so a non-chart layer
+#     smuggled into the artifact is not what gets reconciled.
+#   * spec.interval is the ceiling on how long a merged selection waits before
+#     source-controller re-reads this object. It is a poll of one already
+#     signature-verified OCI reference, so shortening it adds no credential, no
+#     inbound path and no new object — a Flux Receiver would have added all
+#     three (issue #309). One minute keeps the merge-to-live loop bounded by
+#     the release ceremony rather than by a timer.
+#
+# The chart is also the sole workload image-identity carrier; platform
+# HelmRelease values contain no repository, tag, or digest override (ADR 0016).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  annotations:
+    platform.snaraj.dev/chart-release: "0.1.76"
+  name: naranjo-online-chart
+  namespace: naranjo-online
+spec:
+  interval: 1m0s
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    digest: sha256:f6af207beeca485c7c47e8b66efd1e5061a82c65d329ec0b8096571948308fc2
+  timeout: 60s
+  url: oci://ghcr.io/snaraj/charts/naranjo-online
+  verify:
+    matchOIDCIdentity:
+      - issuer: ^https://token\.actions\.githubusercontent\.com$
+        subject: ^https://github\.com/snaraj/naranjo\.online/\.github/workflows/release-publisher\.yml@refs/heads/main$
+    provider: cosign

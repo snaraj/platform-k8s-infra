@@ -1,0 +1,53 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: naranjo-online
+  namespace: naranjo-online
+  labels:
+    app.kubernetes.io/managed-by: fluxcd
+  annotations:
+    platform.snaraj.dev/readiness: active-via-signature-verified-chart
+spec:
+  suspend: false
+  # One minute is the ceiling on how long a merged chart selection waits for
+  # helm-controller to act on it. Like the OCIRepository beside this file it is
+  # a poll of already-verified state, so the shorter interval buys deploy
+  # latency with no webhook receiver, no inbound path and no new object
+  # (issue #309).
+  interval: 1m0s
+  # Helm keeps every release revision as a Secret in this namespace, and
+  # helm-controller retains five when this field is unset. `storage.Create`
+  # prunes history to maxHistory-1 BEFORE writing the new revision, so any
+  # retention default at or above the namespace secret budget wedges the
+  # release permanently: the prune frees nothing, the create is denied by
+  # quota, and no retry can recover it. Observed on this site at revision v5
+  # against a four-Secret budget (issue #198). Two keeps steady-state history
+  # strictly inside that budget while still preserving one rollback target for
+  # the `strategy: rollback` remediation below.
+  maxHistory: 2
+  releaseName: naranjo-online
+  serviceAccountName: helm-reconciler
+  driftDetection:
+    mode: enabled
+  # The chart artifact comes from the signature-verified OCIRepository beside
+  # this file, whose immutable digest is a reviewed platform value — no branch
+  # head, mutable tag, or raw commit can decide what runs. chartRef carries no namespace, so helm-controller
+  # (started with --no-cross-namespace-refs=true) can only ever resolve it
+  # inside this site's own namespace.
+  chartRef:
+    kind: OCIRepository
+    name: naranjo-online-chart
+  install:
+    remediation:
+      retries: 0
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 0
+      strategy: rollback
+  # The exact-site Cosign-verified chart is the sole carrier of image
+  # repository, tag, and digest. A platform image override would decouple the
+  # selected chart release from the workload it deploys. This one explicit
+  # value remains the chart's reviewed activation gate.
+  values:
+    deploymentReady: true
