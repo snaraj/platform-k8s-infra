@@ -279,13 +279,13 @@ while True:
 """
 
 
-def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS) -> str:
+def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS, *, env=None) -> str:
     """Bound gh/cosign execution; signal the group before reaping its leader.
 
     The leader remains alive after its command exits. On every path we dispose
     of the group before wait(), preventing PID reuse from selecting another
     process group. Commands that deliberately create a new session are outside
-    this boundary; this verifier executes only the fixed gh/cosign tool set.
+    this boundary. Callers supply their fixed executable and argument lists.
     """
     if not 0 < timeout <= COSIGN_TIMEOUT_SECONDS:
         raise Refusal("command timeout is outside its bound")
@@ -296,7 +296,7 @@ def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS) -> str:
             process = subprocess.Popen(
                 [sys.executable, "-I", "-B", "-c", SUPERVISOR, str(write_fd), *map(str, argv)],
                 stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
-                pass_fds=(write_fd,), env=pinned_environment(), start_new_session=True,
+                pass_fds=(write_fd,), env=pinned_environment(env), start_new_session=True,
             )
             os.close(write_fd)
             write_fd = -1
