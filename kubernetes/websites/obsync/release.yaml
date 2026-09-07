@@ -1,0 +1,129 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: obsync
+  namespace: obsidian
+  labels:
+    app.kubernetes.io/managed-by: fluxcd
+  annotations:
+    platform.snaraj.dev/readiness: suspended-until-obsync-chart-release
+spec:
+  # Suspended, and `scripts/validate.py` requires exactly that for a pending
+  # application. The OCIRepository beside this file carries the all-zero
+  # sentinel digest, so there is nothing for helm-controller to install and an
+  # unsuspended release would only produce a permanent reconciliation error.
+  # Resuming it is part of the same reviewed change that replaces the sentinel.
+  suspend: true
+  # The same one-minute ceiling the two active applications carry: a poll of
+  # already-verified state, no webhook receiver, no inbound path, no new object.
+  interval: 1m0s
+  # helm-controller retains five release revisions as namespace Secrets when
+  # this field is unset, and `storage.Create` prunes to maxHistory-1 BEFORE
+  # writing the new revision, so any retention at or above the namespace Secret
+  # budget wedges the release permanently. Two keeps steady-state history
+  # inside the budget while preserving one rollback target for the
+  # `strategy: rollback` remediation below.
+  maxHistory: 2
+  releaseName: obsync
+  serviceAccountName: helm-reconciler
+  driftDetection:
+    mode: enabled
+  # The chart artifact comes from the signature-verified OCIRepository beside
+  # this file. While that object carries the sentinel digest, source-controller
+  # produces no artifact and this release installs nothing — the fail-closed
+  # state this onboarding deliberately commits. chartRef carries no namespace,
+  # so helm-controller (started with --no-cross-namespace-refs=true) can only
+  # resolve it inside this application's own namespace.
+  chartRef:
+    kind: OCIRepository
+    name: obsync-chart
+  install:
+    remediation:
+      retries: 0
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 0
+      strategy: rollback
+  # Unlike the two site charts, the obsync chart is a deployment-provider
+  # BINDING POINT: it ships no hostname, no edge posture, no storage class and
+  # no Secret name of its own, and its values schema is closed
+  # (`additionalProperties: false`) and refuses a half-specified deployment.
+  # Everything below is therefore a value the platform must state, and the set
+  # is exact — the manifest-shape policy pins these bytes. What is NOT here is
+  # what matters: no image repository, tag or digest. The signed chart remains
+  # the sole workload image-identity carrier.
+  values:
+    # The reviewed activation gate. It stays false until the namespace, the two
+    # PersistentVolumes and the server-key Secret all exist on the cluster and
+    # the chart selection above names a real digest; flipping it is a separate
+    # reviewed change, not a side effect of this onboarding.
+    deploymentReady: false
+    # `none`, NOT `cloudflare`, and the wrong value here fails closed but
+    # totally. `cloudflare` makes the server REQUIRE the edge's
+    # connecting-address and request-id headers on every request and refuse
+    # requests that lack them. Those are set by Cloudflare's HTTP edge on a
+    # PUBLIC hostname path. This workload is reached over a PRIVATE WARP route
+    # that never traverses that edge, so they are never set and `cloudflare`
+    # would refuse every request from the owner's own device.
+    edge:
+      mode: none
+    # The in-cluster TLS proxy, NEVER the Tunnel connector. The obsync server
+    # speaks plain HTTP; binding this peer to the connector would admit the
+    # connector straight to that cleartext listener. The reviewed design admits
+    # only connector -> proxy (TLS) and proxy -> application (HTTP).
+    #
+    # PENDING IDENTITY. The proxy is a separate platform workload — not a
+    # sidecar — whose exact labels arrive with the security lane's own reviewed
+    # deployment change and replace these two values in that same change. No
+    # Pod in this cluster carries them today, so the rendered ingress policy
+    # admits nothing and this release stays non-deployable. That is the correct
+    # interim state: an absent matching proxy is a route that does not work,
+    # whereas naming the connector "temporarily" would be a route that works
+    # and should not.
+    ingress:
+      peerAppName: obsync-tls-proxy
+      peerInstance: obsync-tls-proxy-pending
+      peerNamespace: obsidian
+    # Empty, not a sentinel hostname. The chart's closed schema admits the
+    # empty string and the application treats an unset public URL as unset —
+    # the pairing page shows none and a device is given the address by the
+    # person setting it up. The owner's private name and the private route's
+    # address live only in operator inputs and never enter this repository; a
+    # placeholder hostname is a habit of carrying the real one later.
+    publicUrl: ""
+    # The envelope the platform's namespace ResourceQuota is derived from.
+    # `2000m` rather than `2`: identical to Kubernetes, and it keeps this
+    # manifest inside an unquoted-scalar grammar.
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    # A Secret reference, never a literal: this repository carries no secrets
+    # and this one is created by an owner ceremony on the cluster.
+    serverKeySecret:
+      key: OBSYNC_SERVER_KEY
+      name: obsync-server-key
+    # `size` is what the claim requests AND what the server is told through
+    # OBSYNC_*_CAPACITY — the claim guarantee is the only number that cannot
+    # overstate what the pod may write. `capacity` records what the operator
+    # provisioned on the volume the claim binds to, so a 250Gi -> 500Gi growth
+    # is one values edit stating both facts.
+    storage:
+      blobs:
+        capacity: 250Gi
+        className: local-pie-ssd
+        size: 250Gi
+      journal:
+        capacity: 4Gi
+        className: local-pie-ssd
+        size: 4Gi
+    # Empty is the STRICT setting, not the lazy one: in `none` edge mode the
+    # server believes a forwarded address only from a listed range, so an empty
+    # list means it believes only the peer address — the TLS proxy above, the
+    # sole ingress path the default-deny policy admits. A CIDR here would make
+    # an `X-Forwarded-For` header believable from anything in that range.
+    trustedProxyCidrs: []

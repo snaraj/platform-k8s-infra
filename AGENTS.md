@@ -24,8 +24,17 @@ prerequisites, controller authority, Git sources, reconciliation and recovery.
 
 ## Application boundary
 
-- Only the two declared application directories may contribute manifests.
-  Each contains one default-deny NetworkPolicy, OCIRepository and HelmRelease.
+- Only declared application directories may contribute manifests, and the
+  declaration is two exact maps in `scripts/validate.py`, never a pattern.
+  Each directory contains one default-deny NetworkPolicy, OCIRepository and
+  HelmRelease. `APPLICATIONS` is the ACTIVE set: it has published releases,
+  acquired artifacts, and the acquisition receipt must bind exactly it.
+  `PENDING_APPLICATIONS` is the narrower set for a workload whose publisher
+  has cut no release: its directory is inventoried and byte-pinned, its
+  selection may be ONLY the fail-closed sentinel digest, its release must be
+  suspended and not ready, it contributes no receipt record, and no proposal
+  may write its paths. Promotion is one reviewed change that moves an entry
+  between the maps and adds its receipt record; a place is never reserved.
 - Preserve the complete application source/chart/image/publisher identity.
   Select immutable digests and independently verify acquisition evidence.
 - Default-deny policies move with application composition. Namespace creation,
