@@ -126,6 +126,17 @@ def clean(root, head):
     require(not git(root, "status", "--porcelain=v1", "--untracked-files=normal"), "checkout is not clean")
 
 
+def no_existing_pushurl(root):
+    # A command-line URL adds to configured URLs. Require no configured pushurl
+    # so this invocation can set exactly one without an HTTPS fallback attempt.
+    try:
+        git(root, "config", "--name-only", "--get-regexp", r"^remote\.origin\.pushurl$")
+    except subprocess.CalledProcessError as error:
+        require(error.returncode == 1, "push URL configuration could not be checked")
+        return
+    raise ValueError("an explicit origin push URL is already configured")
+
+
 def protected_base(github):
     repository = github.api(f"repos/{REPOSITORY}")
     require(str(repository.get("id")) == publication.REPOSITORY_ID
@@ -214,6 +225,7 @@ def prepare_and_publish(destination: Path, root, run):
             {f"https://github.com/{REPOSITORY}.git", REMOTE}, "origin is not the destination")
     require(git(root, "remote", "get-url", "--push", "--all", "origin") in
             {f"https://github.com/{REPOSITORY}.git", REMOTE}, "push origin is not the destination")
+    no_existing_pushurl(root)
     no_open_proposals(run)
     require(not destination.exists() and not destination.is_symlink()
             and destination.parent.is_dir() and destination.parent.resolve() == destination.parent
@@ -257,10 +269,11 @@ def prepare_and_publish(destination: Path, root, run):
         clean(root, base)
         require(protected_base(github) == base, "protected main changed before publication")
         no_open_proposals(run)
+        no_existing_pushurl(root)
         # Mandatory pre-push hook repeats the exact remote/main/history checks.
         # The per-command URL avoids persisting a remote or credential change.
         run(["git", "-C", str(destination), "-c", "core.hooksPath=.githooks", "-c",
-             f"remote.origin.url={REMOTE}", "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"], timeout=120)
+             f"remote.origin.pushurl={REMOTE}", "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"], timeout=120)
         require(protected_base(github) == base, "protected main changed after push; leave branch for review")
         remote_commit = github.api(f"repos/{REPOSITORY}/commits/{head}")
         require(remote_commit.get("sha") == head and remote_commit.get("commit", {}).get("verification", {}).get("verified") is True,

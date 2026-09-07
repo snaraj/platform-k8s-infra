@@ -85,7 +85,9 @@ runs before the explicit branch push. GitHub CLI must already act as the owner;
 exactly one owner-registered SSH signing public key must be loaded in the agent.
 The helper checks Cosign 3.1.3 and ORAS 1.3.4 compatibility versions for receipt
 metadata, using the existing Python client for registry reads. It neither
-provisions credentials nor changes Git configuration.
+provisions credentials nor changes Git configuration. Origin must name this
+repository and have no explicit push URL; the command supplies exactly one SSH
+push URL for that invocation.
 
 The result is one signed Draft PR. A distinct reviewer, successful required CI
 and an independent Ready coordinator remain mandatory; only the owner merges.

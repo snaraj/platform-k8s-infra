@@ -285,7 +285,7 @@ def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS, *, env=None) -> str:
     The leader remains alive after its command exits. On every path we dispose
     of the group before wait(), preventing PID reuse from selecting another
     process group. Commands that deliberately create a new session are outside
-    this boundary; this verifier executes only the fixed gh/cosign tool set.
+    this boundary. Callers supply their fixed executable and argument lists.
     """
     if not 0 < timeout <= COSIGN_TIMEOUT_SECONDS:
         raise Refusal("command timeout is outside its bound")

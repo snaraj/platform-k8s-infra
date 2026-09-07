@@ -322,7 +322,8 @@ class ProposalFlowTests(unittest.TestCase):
             if argv[0] == "git":
                 steps.append("push")
                 self.assertIn("core.hooksPath=.githooks", argv)
-                self.assertIn(f"remote.origin.url={updates.REMOTE}", argv)
+                self.assertIn(f"remote.origin.pushurl={updates.REMOTE}", argv)
+                self.assertNotIn(f"remote.origin.url={updates.REMOTE}", argv)
                 self.assertEqual(argv[-2], "origin")
                 self.assertEqual(argv[-1].split(":"), ["refs/heads/" + native_git(destination, "branch", "--show-current")] * 2)
                 self.assertNotIn("--force", argv)
@@ -390,6 +391,8 @@ class ProposalFlowTests(unittest.TestCase):
                 return "1" * 40
             if args[0] == "status":
                 return ""
+            if args[0] == "config":
+                raise subprocess.CalledProcessError(1, ["git", "config"])
             if "--push" in args:
                 return "git@github.com:snaraj/platform.git"
             return updates.REMOTE
@@ -399,6 +402,20 @@ class ProposalFlowTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "push origin"):
                 updates.prepare_and_publish(self.root.parent / "new", self.root, Mock())
         plan.assert_not_called()
+
+    def test_native_push_url_is_single_and_the_override_is_not_persisted(self):
+        updates.git(self.root, "init", "-b", "main")
+        updates.git(self.root, "remote", "add", "origin", f"https://github.com/{updates.REPOSITORY}.git")
+        updates.no_existing_pushurl(self.root)
+        actual = updates.git(self.root, "-c", f"remote.origin.pushurl={updates.REMOTE}",
+                             "remote", "get-url", "--push", "--all", "origin")
+        self.assertEqual(actual.splitlines(), [updates.REMOTE])
+        updates.no_existing_pushurl(self.root)
+        self.assertEqual(updates.git(self.root, "remote", "get-url", "origin"),
+                         f"https://github.com/{updates.REPOSITORY}.git")
+        updates.git(self.root, "config", "remote.origin.pushurl", updates.REMOTE)
+        with self.assertRaisesRegex(ValueError, "already configured"):
+            updates.no_existing_pushurl(self.root)
 
     def test_native_lock_refuses_a_second_proposal_writer(self):
         updates.git(self.root, "init", "-b", "main")
