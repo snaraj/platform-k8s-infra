@@ -136,6 +136,143 @@ class CompositionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "fresh acquisition"):
                 composition.verify(self.root)
 
+    # --- The pending-application declaration (issue #348) -------------------
+    #
+    # A third application cannot simply be appended to APPLICATIONS before its
+    # publisher cuts a release: there is no acquired artifact and no receipt
+    # record to point at. PENDING_APPLICATIONS is the narrower declaration that
+    # admits its directory without admitting it to the receipt closure, and
+    # every rule below is an INVERSION of an active application's rule rather
+    # than an exemption from it. Each is proven in both directions, because a
+    # pending rule that only ever fires on pending input would let the active
+    # rule rot unnoticed and vice versa.
+
+    def pending_slug(self):
+        slugs = sorted(composition.PENDING_APPLICATIONS)
+        self.assertEqual(len(slugs), 1, "one pending application is declared")
+        return slugs[0]
+
+    def test_the_two_maps_are_disjoint_and_the_boundary_covers_both(self):
+        self.assertEqual(
+            set(composition.APPLICATIONS) & set(composition.PENDING_APPLICATIONS), set()
+        )
+        selections, receipt = composition.check(self.root)
+        # The positive control the rest of this block needs: a pending
+        # application contributes NO selection and NO receipt record, and the
+        # two active applications are untouched by its presence.
+        self.assertEqual(set(selections), set(composition.APPLICATIONS))
+        self.assertEqual(set(receipt["records"]), set(composition.APPLICATIONS))
+        self.assertNotIn(self.pending_slug(), selections)
+        self.assertNotIn(self.pending_slug(), receipt["records"])
+
+    def test_a_pending_selection_may_be_the_sentinel_and_nothing_else(self):
+        slug = self.pending_slug()
+        path = self.root / "kubernetes/websites" / slug / "source.yaml"
+        original = path.read_text()
+        self.assertIn(composition.SENTINEL_DIGEST, original)
+        for replacement in ("sha256:" + "1" * 64, "sha256:" + "a" * 64):
+            with self.subTest(digest=replacement):
+                path.write_text(original.replace(composition.SENTINEL_DIGEST, replacement))
+                with self.assertRaisesRegex(ValueError, "must select the sentinel digest"):
+                    composition.check(self.root)
+        path.write_text(original)
+        composition.check(self.root)
+
+    def test_an_active_selection_may_be_anything_but_the_sentinel(self):
+        """The inverse arm, so neither rule can be deleted without a red run."""
+
+        path = self.root / "kubernetes/websites/naranjo-online/source.yaml"
+        original = path.read_text()
+        digest = composition.DIGEST_LINE.findall(original)[0]
+        path.write_text(original.replace(digest, composition.SENTINEL_DIGEST))
+        with self.assertRaisesRegex(ValueError, "invalid or unresolved"):
+            composition.check(self.root)
+        path.write_text(original)
+
+    def test_a_pending_release_must_stay_suspended_and_not_ready(self):
+        slug = self.pending_slug()
+        path = self.root / "kubernetes/websites" / slug / "release.yaml"
+        original = path.read_text()
+        for before, after in (
+            ("  suspend: true", "  suspend: false"),
+            ("    deploymentReady: false", "    deploymentReady: true"),
+        ):
+            with self.subTest(mutation=after):
+                self.assertEqual(original.count(before), 1)
+                path.write_text(original.replace(before, after))
+                with self.assertRaisesRegex(ValueError, "suspended and not ready"):
+                    composition.check(self.root)
+            path.write_text(original)
+
+    def test_a_third_undeclared_directory_is_refused(self):
+        """A directory nobody declared is inventory, not composition."""
+
+        extra = self.root / "kubernetes/websites/undeclared"
+        extra.mkdir()
+        source = self.root / "kubernetes/websites" / self.pending_slug()
+        for name in composition.FILES:
+            (extra / name).write_bytes((source / name).read_bytes())
+        with self.assertRaisesRegex(ValueError, "inventory"):
+            composition.check(self.root)
+
+    def test_a_tag_or_a_second_digest_cannot_join_a_pending_selection(self):
+        slug = self.pending_slug()
+        path = self.root / "kubernetes/websites" / slug / "source.yaml"
+        original = path.read_text()
+        digest_line = "    digest: " + composition.SENTINEL_DIGEST
+        self.assertEqual(original.count(digest_line), 1)
+        for label, replacement, expected in (
+            ("tag beside the digest", digest_line + "\n    tag: v0.1.0", "reviewed application boundary"),
+            ("second digest", digest_line + "\n" + digest_line, "one version and one digest"),
+            ("semver range", digest_line + "\n    semver: \">=0.1.0\"", "reviewed application boundary"),
+        ):
+            with self.subTest(mutation=label):
+                path.write_text(original.replace(digest_line, replacement))
+                with self.assertRaisesRegex(ValueError, expected):
+                    composition.check(self.root)
+            path.write_text(original)
+
+    def test_a_cross_namespace_reference_is_refused_in_the_pending_release(self):
+        slug = self.pending_slug()
+        path = self.root / "kubernetes/websites" / slug / "release.yaml"
+        original = path.read_text()
+        for before, after in (
+            ("    name: obsync-chart", "    name: obsync-chart\n    namespace: naranjo-online"),
+            ("  namespace: obsidian", "  namespace: naranjo-online"),
+            ("  serviceAccountName: helm-reconciler", "  serviceAccountName: default"),
+        ):
+            with self.subTest(mutation=after):
+                self.assertEqual(original.count(before), 1)
+                path.write_text(original.replace(before, after))
+                with self.assertRaisesRegex(ValueError, "reviewed application boundary"):
+                    composition.check(self.root)
+            path.write_text(original)
+
+    def test_composition_may_not_activate_storage(self):
+        """Storage activation is an operator decision, never an application one.
+
+        The chart creates CLAIMS at render time and this repository never
+        renders it, so nothing here needs a claim volume or a storage object.
+        A manifest that declared one would be reaching past the application
+        boundary into the volume, class and node path an operator owns; the
+        refusal names that rather than reporting a changed byte pin.
+        """
+
+        slug = self.pending_slug()
+        path = self.root / "kubernetes/websites" / slug / "release.yaml"
+        original = path.read_text()
+        for label, addition in (
+            ("claim object", "---\napiVersion: v1\nkind: PersistentVolumeClaim\n"),
+            ("storage class", "---\napiVersion: storage.k8s.io/v1\nkind: StorageClass\n"),
+            ("claim volume", "    volumes:\n      - persistentVolumeClaim:\n          claimName: obsync-blobs\n"),
+            ("csi volume", "    volumes:\n      - csi:\n          driver: example\n"),
+        ):
+            with self.subTest(mutation=label):
+                path.write_text(original + addition)
+                with self.assertRaisesRegex(ValueError, "must not activate storage"):
+                    composition.check(self.root)
+            path.write_text(original)
+
     def test_complete_record_schema_is_closed_before_network_access(self):
         original = self.receipt()
         changes = (
