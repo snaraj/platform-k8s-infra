@@ -20,7 +20,7 @@ MAX_TREE = 16 * 1024 * 1024
 ROOT_FILES = {"README.md", "AGENTS.md", "SECURITY.md", "Makefile", ".gitignore"}
 PATHS = re.compile(r"(?:scripts/[a-z0-9_/-]+\.(?:py|sh)|tests/test_[a-z0-9_]+\.py|"
                    r"policies/[a-z0-9_-]+\.(?:json|toml)|docs/[a-z0-9_/-]+\.(?:json|md)|"
-                   r"\.github/workflows/[a-z0-9_-]+\.yml|\.github/CODEOWNERS|\.githooks/pre-push|"
+                   r"\.github/workflows/[a-z0-9_-]+\.yml|\.github/CODEOWNERS|\.github/dependabot\.yml|\.githooks/pre-push|"
                    r"kubernetes/websites/(?:naranjo-online|lidersea-com)/[a-z-]+\.yaml)")
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 IPV4 = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")

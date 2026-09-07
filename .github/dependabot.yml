@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "updates": [
+    {
+      "package-ecosystem": "github-actions",
+      "directory": "/",
+      "schedule": {
+        "interval": "cron",
+        "cronjob": "31 7 * * *",
+        "timezone": "UTC"
+      },
+      "open-pull-requests-limit": 5,
+      "groups": {
+        "codeql-action": {
+          "patterns": ["github/codeql-action*"],
+          "applies-to": "version-updates"
+        },
+        "codeql-security": {
+          "patterns": ["github/codeql-action*"],
+          "applies-to": "security-updates"
+        }
+      }
+    }
+  ]
+}

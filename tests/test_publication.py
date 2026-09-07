@@ -38,6 +38,13 @@ class PublicationTests(unittest.TestCase):
         publication.history(self.base, head, self.root)
         publication.working_tree(self.root)
 
+    def test_dependabot_addition_preserves_the_closed_configuration_path(self):
+        publication.path_allowed(".github/dependabot.yml")
+        for path in (".github/dependabot.yaml", ".github/dependabot.yml.bak",
+                     ".github/renovate.json", ".github/other.yml"):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "unexpected publication"):
+                publication.path_allowed(path)
+
     def test_deleted_intermediate_private_content_cannot_escape(self):
         path = self.root / "README.md"
         path.write_text("workstation=" + "/" + "Users/" + "example/private\n")
