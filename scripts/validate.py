@@ -99,9 +99,16 @@ def check(root: Path = ROOT) -> tuple[dict, dict]:
     receipt = json.loads(payload, object_pairs_hook=unique_object)
     if set(receipt) != {"capturedDate", "chartLayerMediaType", "records", "schema", "tools"}:
         raise ValueError("receipt fields are not exact")
+    tools = receipt.get("tools")
+    tool_versions_are_closed = (
+        isinstance(tools, dict)
+        and set(tools) == {"cosign", "oras"}
+        and all(isinstance(value, str) and artifacts.VERSION_RE.fullmatch(value)
+                for value in tools.values())
+    )
     if (receipt["schema"] != "dev.snaraj.chart-acquisition-receipt/v2"
             or receipt["chartLayerMediaType"] != artifacts.HELM_LAYER
-            or receipt["tools"] != {"cosign": "3.1.3", "oras": "1.3.3"}
+            or not tool_versions_are_closed
             or set(receipt["records"]) != set(APPLICATIONS)):
         raise ValueError("receipt authority is not exact")
     if datetime.date.fromisoformat(receipt["capturedDate"]).isoformat() != receipt["capturedDate"]:

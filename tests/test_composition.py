@@ -99,6 +99,23 @@ class CompositionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not canonical"):
             composition.check(self.root)
 
+    def test_receipt_tool_inventory_and_versions_are_closed(self):
+        original = self.receipt()
+        changes = (
+            lambda tools: tools.pop("oras"),
+            lambda tools: tools.update(extra="1.2.3"),
+            lambda tools: tools.update(oras="v1.3.4"),
+            lambda tools: tools.update(oras="1.03.4"),
+            lambda tools: tools.update(oras=True),
+            lambda tools: tools.update(cosign=None),
+        )
+        for mutate in changes:
+            receipt = json.loads(json.dumps(original))
+            mutate(receipt["tools"])
+            self.write_receipt(receipt)
+            with self.assertRaisesRegex(ValueError, "authority is not exact"):
+                composition.check(self.root)
+
     def test_a_new_selection_changes_only_the_two_permitted_fields(self):
         receipt = self.receipt()
         old = receipt["records"]["naranjo-online"]

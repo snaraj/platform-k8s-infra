@@ -1,34 +1,34 @@
 {
   "chartLayerMediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-  "capturedDate": "2026-09-05",
+  "capturedDate": "2026-09-07",
   "records": {
     "lidersea-com": {
-      "arm64Digest": "sha256:39929c6aaf5cc3c4feca57a7eac12858e83cc84505b99fdf0e0b57d6752d88e9",
-      "chart": {"appVersion": "0.1.41", "name": "lidersea-com", "version": "0.1.41"},
-      "chartConfigDigest": "sha256:ae045bde722060e04ae5f8b6c3fc4135386068026d787692c055852ade98f289",
-      "chartLayerDigest": "sha256:2c2b92acd6488afe16b1deb034e445ce3064256c1971415f8600eb601fdd09cc",
+      "arm64Digest": "sha256:f424768e07081d7f8fd85f0ea05e3e1e85421d62de27fe08109193a3813b0de9",
+      "chart": {"appVersion": "0.1.42", "name": "lidersea-com", "version": "0.1.42"},
+      "chartConfigDigest": "sha256:9f9bc51575f980940cb8562e6b50d0ac078a560b9cc67678b0169895d3747c16",
+      "chartLayerDigest": "sha256:7497364e68af0f909625735bb1b7fe64120fd6920a2ff0e16dcefd9ebe352d99",
       "chartRepository": "ghcr.io/snaraj/charts/lidersea-com",
-      "chartTag": "0.1.41",
-      "manifestDigest": "sha256:a3d242a2689c2c41a8d6960e848ea3b195ae14bc80cbf9461de36f69d4845cb6",
+      "chartTag": "0.1.42",
+      "manifestDigest": "sha256:5a944c4602cd1b1df8b6613bc2daa037dcc00b2616402de33e5eece1edd8cdf7",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:34404bf9c348f50c0f4d0ff0a3a6efbe8b41eedf40d9ab58b1b3fa3eb4ff26d9", "sourceSha": "382272756fafe6b7e7f52602fd6263299b5c2589"},
+      "release": {"assetDigest": "sha256:b6e90ea1ff09854fae7319af3741ff5640ae3da8a2a7e4937d041b68fda30422", "sourceSha": "ff25643033f89996b32826a3ac02d0bee9074536"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/lidersea.com/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.41@sha256:f661cdf9e33e8b36389b7f2d130a6fff6cbc1bbcb1c460968de416a831fdd86d"
+      "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.42@sha256:d23a20d3c222f7acb7e3a5e2391767eb5762dae3865eb1546b809d0811b8abc9"
     },
     "naranjo-online": {
-      "arm64Digest": "sha256:90ba385feb4fb7291a17622a7543e957d7f8c9c068c4df9c8044221564246825",
-      "chart": {"appVersion": "0.1.76", "name": "naranjo-online", "version": "0.1.76"},
-      "chartConfigDigest": "sha256:767fa7691ebb0a6ade7e1c5fbc2c3e53c60f06d9f2f0dca9e802d51af9043ee0",
-      "chartLayerDigest": "sha256:3801778d0cf8e06b92517f051ac63eea4790a0ff5ae4c6d6e59a7f8c687854e4",
+      "arm64Digest": "sha256:6e3c2d23ad04a61aa22d3c123802922c4d1360e8ca10c0635fe3511ad94ac786",
+      "chart": {"appVersion": "0.1.80", "name": "naranjo-online", "version": "0.1.80"},
+      "chartConfigDigest": "sha256:c3c21cbc2b029703ef13dda2818d296282ad0ca8f3df65bc424fe81998622c4f",
+      "chartLayerDigest": "sha256:c9a3ee1272562dd7ab38d3ab834e491f8c689a799ee33eec56fa3fc9937ebe7f",
       "chartRepository": "ghcr.io/snaraj/charts/naranjo-online",
-      "chartTag": "0.1.76",
-      "manifestDigest": "sha256:f6af207beeca485c7c47e8b66efd1e5061a82c65d329ec0b8096571948308fc2",
+      "chartTag": "0.1.80",
+      "manifestDigest": "sha256:a665c74985b0dc3e9b8351c0306d58f8d318a581f7fdda71874a98fde85773f3",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:bdd4dc843ee0b935981a209a279247a3ecd3d58ac3c01b5831c1772f14027253", "sourceSha": "beaaf95a33a300cdadc9e5b69535a89edd165c78"},
+      "release": {"assetDigest": "sha256:61825308c6290fb46f38b58c92c451b1c826b0474ca98ce911f7785ac3a0c135", "sourceSha": "6ce0887c38b5f70ceff7d75f3cc1a91dd6947093"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/naranjo.online/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.76@sha256:a27d48f5c2b50c95fc9e060e67a500eaeba8445e038a2ec3f3d98d37267c7d4b"
+      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.80@sha256:63236d492c84e7d0e48f3e8b8c1b7551053defbd6461e27a3b3e6e5c1559f05f"
     }
   },
   "schema": "dev.snaraj.chart-acquisition-receipt/v2",
-  "tools": {"cosign": "3.1.3", "oras": "1.3.3"}
+  "tools": {"cosign": "3.1.3", "oras": "1.3.4"}
 }
