@@ -1,0 +1,42 @@
+{
+  "name": "Selected artifact verification",
+  "on": {
+    "schedule": [{"cron": "19 7 * * *"}],
+    "workflow_dispatch": {}
+  },
+  "permissions": {},
+  "concurrency": {
+    "group": "selected-artifacts-${{ github.ref }}",
+    "cancel-in-progress": false
+  },
+  "jobs": {
+    "verify-selected-artifacts": {
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 15,
+      "permissions": {"contents": "read"},
+      "env": {"PYTHONDONTWRITEBYTECODE": "1"},
+      "steps": [
+        {
+          "name": "Require protected main",
+          "run": "test \"$GITHUB_REF\" = refs/heads/main"
+        },
+        {
+          "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Install checksum-verified tools",
+          "run": "bash scripts/ci/install-tools.sh verify"
+        },
+        {
+          "name": "Reproduce the currently selected acquisition receipts",
+          "env": {"GH_TOKEN": "${{ github.token }}"},
+          "run": "make verify"
+        }
+      ]
+    }
+  }
+}

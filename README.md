@@ -47,6 +47,19 @@ The publication hook accepts one author branch at a time and scans
 every outgoing commit, including material removed before the final tree.
 Use `git -c core.hooksPath=.githooks push origin <task-branch>` after local checks.
 
+Between changes, **Selected artifact verification** runs daily at 07:19 UTC.
+Its manual workflow dispatch accepts `main` only. It repeats `make verify`
+against the manifests and acquisition receipts at the triggering main commit,
+including older releases still selected for deployment. Failures remain failed
+workflow runs; the job does not select a newer release, publish or deploy.
+This identity check does not rescan images for newly disclosed vulnerabilities.
+
+Dependabot checks GitHub Actions updates every day at 07:31 UTC, including
+weekends. CodeQL's paired actions are grouped for both version and security
+updates. Proposals still need the repository's normal validation, independent
+review and owner merge. GitHub's advisory-driven security updates are separate
+from the scheduled version checks.
+
 ## Operation
 
 `platform` defines which Git source the cluster consumes and owns the
