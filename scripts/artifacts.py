@@ -279,7 +279,7 @@ while True:
 """
 
 
-def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS) -> str:
+def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS, *, env=None) -> str:
     """Bound gh/cosign execution; signal the group before reaping its leader.
 
     The leader remains alive after its command exits. On every path we dispose
@@ -296,7 +296,7 @@ def run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS) -> str:
             process = subprocess.Popen(
                 [sys.executable, "-I", "-B", "-c", SUPERVISOR, str(write_fd), *map(str, argv)],
                 stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
-                pass_fds=(write_fd,), env=pinned_environment(), start_new_session=True,
+                pass_fds=(write_fd,), env=pinned_environment(env), start_new_session=True,
             )
             os.close(write_fd)
             write_fd = -1

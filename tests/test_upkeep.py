@@ -74,8 +74,8 @@ class UpkeepTests(unittest.TestCase):
 
     def test_only_main_can_reach_the_pinned_checkout_and_existing_verifier(self):
         steps = self.job["steps"]
-        self.assertEqual(len(steps), 4)
-        main_guard, checkout, tools, verify = steps
+        self.assertEqual(len(steps), 5)
+        main_guard, checkout, tools, verify, latest = steps
         self.assertEqual(set(main_guard), {"name", "run"})
         for ref, expected in (("refs/heads/main", 0), ("refs/heads/candidate", 1), ("", 1)):
             result = subprocess.run(["/bin/sh", "-eu", "-c", main_guard["run"]],
@@ -91,6 +91,9 @@ class UpkeepTests(unittest.TestCase):
         self.assertEqual(set(verify), {"name", "env", "run"})
         self.assertEqual(verify["env"], {"GH_TOKEN": "${{ github.token }}"})
         self.assertEqual(verify["run"], "make verify")
+        self.assertEqual(latest, {"name": "Detect newer immutable application releases",
+                                  "env": {"GH_TOKEN": "${{ github.token }}"},
+                                  "run": "python3 -I -B scripts/updates.py check-latest"})
         makefile = (ROOT / "Makefile").read_text()
         self.assertEqual(re.search(r"^verify:\n(\t[^\n]+)\n", makefile, re.MULTILINE).group(1),
                          "\t$(PYTHON) -I -B scripts/validate.py verify")

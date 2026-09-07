@@ -51,7 +51,9 @@ Between changes, **Selected artifact verification** runs daily at 07:19 UTC.
 Its manual workflow dispatch accepts `main` only. It repeats `make verify`
 against the manifests and acquisition receipts at the triggering main commit,
 including older releases still selected for deployment. Failures remain failed
-workflow runs; the job does not select a newer release, publish or deploy.
+workflow runs. A second read-only check compares both selections with their
+latest immutable final releases; missing inventory, malformed releases,
+regressions and newer versions fail the run. The job never publishes or deploys.
 This identity check does not rescan images for newly disclosed vulnerabilities.
 
 Dependabot checks GitHub Actions updates every day at 07:31 UTC, including
@@ -59,6 +61,41 @@ weekends. CodeQL's paired actions are grouped for both version and security
 updates. Proposals still need the repository's normal validation, independent
 review and owner merge. GitHub's advisory-driven security updates are separate
 from the scheduled version checks.
+
+## Propose application updates
+
+From a clean dedicated checkout at current protected `main`, choose a new
+worktree outside that checkout:
+
+```sh
+python3 -I -B scripts/updates.py check-latest
+python3 -I -B scripts/updates.py propose --worktree /absolute/new/worktree
+```
+
+`check-latest` returns `CURRENT`, `DRIFT` or a failed `UNKNOWN` check. The
+scheduled workflow also verifies the currently selected artifacts; checking
+which release is latest alone does not establish artifact authenticity.
+
+`propose` independently acquires both applications' latest immutable releases,
+reproduces unchanged selections, and refuses regressions or changing release
+metadata. It creates a new worktree containing only changed chart versions and
+digests plus the complete acquisition receipt. Existing checks and fresh
+artifact verification run before signing and the mandatory publication hook
+runs before the explicit branch push. GitHub CLI must already act as the owner;
+exactly one owner-registered SSH signing public key must be loaded in the agent.
+The helper checks Cosign 3.1.3 and ORAS 1.3.4 compatibility versions for receipt
+metadata, using the existing Python client for registry reads. It neither
+provisions credentials nor changes Git configuration.
+
+The result is one signed Draft PR. A distinct reviewer, successful required CI
+and an independent Ready coordinator remain mandatory; only the owner merges.
+A repository-local lock serializes proposal writers, and existing open update
+proposals block another proposal. Changed bases and
+partial publication fail closed: preserve the branch/worktree and inspect the
+actual PR state before retrying. The helper never rewrites or deletes refs,
+changes Ready state, installs a scheduled writer, or performs a deployment.
+A scheduler must use this destination only after its source is activated and
+must stop the previous composition writer first.
 
 ## Operation
 

@@ -49,6 +49,15 @@ class ProcessTests(unittest.TestCase):
                 time.sleep(1)
                 self.assertFalse(marker.exists())
 
+    def test_explicit_command_environment_excludes_ambient_overrides(self):
+        with patch.dict(os.environ, {"APPLICATION_UNEXPECTED": "ambient"}):
+            output = artifacts.run_command(
+                [sys.executable, "-c", "import os; print(os.getenv('APPLICATION_UNEXPECTED', 'absent')); print(os.getenv('APPLICATION_EXPECTED'))"],
+                env={"PATH": os.environ["PATH"], "APPLICATION_EXPECTED": "explicit"})
+        self.assertEqual(output, "absent\nexplicit\n")
+        with self.assertRaisesRegex(artifacts.Refusal, "outside its bound"):
+            artifacts.run_command([sys.executable, "-c", "pass"], timeout=121)
+
     def test_registry_configuration_is_always_anonymous(self):
         env = artifacts.pinned_environment({"DOCKER_CONFIG": "/invalid/ambient"})
         self.assertNotEqual(env["DOCKER_CONFIG"], "/invalid/ambient")

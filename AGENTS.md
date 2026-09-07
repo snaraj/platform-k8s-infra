@@ -49,3 +49,14 @@ history and privacy. No source-release publisher or cluster credential belongs
 here. Source activation requires current proof that acquisition verification,
 CI and repository protections pass. Repository content alone does not prove
 live reconciliation or workload health.
+
+## Generated application proposals
+
+`scripts/updates.py propose` may create signed Draft application updates from a
+clean current protected checkout. Its generated commit uses the owner identity
+and the final line `- Application update proposer`. Only chart selection fields
+and the complete acquisition receipt may change. Generated proposals receive
+independent exact-head review and the same required CI and coordinator Ready
+check as authored changes; there is no machine-proof review exemption. Repair
+helper or fixture defects in a normal authored PR, then regenerate from merged
+protected code. Never patch a generated head into a mixed code/promotion PR.
