@@ -107,37 +107,59 @@ access mode alone prevents a second writer is wrong, and this document does not
 make one. `ReadWriteOncePod`, which WOULD express one-Pod exclusivity, needs a
 CSI driver and is not available on the non-CSI local class this workload uses.
 
-The intended boundary is three things, none of them the access mode, and the
-first is **not yet established** — it is the control this design depends on,
-under review upstream as this is written:
+The boundary is three things, none of them the access mode, and they do not
+divide the way the word "lock" suggests. Stated as it is:
 
-1. **The server's own exclusive advisory lock on the journal root — INTENDED,
-   PENDING UPSTREAM REVIEW.** `Store::open` takes an exclusive advisory lock on
-   `v1/lock` of the journal volume before reading a byte (Rust
-   `File::try_lock`, flock semantics); a second `obsyncd` on the same volumes
-   refuses to start, logging
+1. **The server's own exclusive advisory lock on the journal root — refuses
+   COOPERATIVE duplicates, and nothing more.** `Store::open` takes an exclusive
+   advisory lock on `v1/lock` of the journal volume before reading a byte (Rust
+   `File::try_lock`, flock semantics); a second `obsyncd` opening the same
+   `v1/lock` refuses to start, logging
    `event=store_open decision=refused reason=journal_locked`, covered by
    `storage::tests::a_second_process_on_the_same_journal_refuses_to_start` and
    image-smoke property 7, which starts a second container on the same volumes
    beside a serving one and requires the refusal.
 
-   The first head to carry it, `snaraj/obsync` `9a5e96d`, did NOT close the
-   boundary: the chart still set `fsGroup` and the posture accepted a
-   group-writable parent, so a second Pod running with the same uid or gid
-   could rename `v1` and take a lock on a different `v1/lock` — the lock held,
-   and it held on the wrong file. The candidate head that repairs it is
-   `a93e97e` (group write refused regardless of gid, canonical-path refusal, no
-   `fsGroup`), and it is under review now. **This document cites `a93e97e` as a
-   CANDIDATE, not as an established control, and no activation may rely on it
-   until that review returns an APPROVE at an exact head.** The reviewed head
-   replaces this paragraph in the change that records it.
+   What that buys is real but narrow: it stops this deployment colliding with
+   ITSELF — a rollout surge that briefly overlaps two Pods, an operator running
+   `check` or `export` beside a live `serve` (both refuse while `serve` holds
+   the lock). Every one of those is a cooperative process that opens the path it
+   is pointed at.
 
-   Because the mechanism is a filesystem lock rather than a group permission,
-   the host directories carry the condition instead:
+   It does NOT exclude an arbitrary Pod, and this document does not claim it
+   does. Owning a directory IS rename authority: the volumes are owned by
+   `65532`, so any process running as `65532` with the journal mounted — a
+   second Pod of this same workload included — can rename `v1` aside, create a
+   fresh `v1`, and take an uncontended lock on a different file. The lock holds;
+   it holds on a file nobody else wanted. No in-process lock can close that,
+   because the attacker and the holder have equal authority over the namespace
+   the lock lives in.
+
+   **Exclusion of an arbitrary Pod is therefore the PLATFORM's admission
+   decision, not the application's lock**: `replicas: 1` and `strategy:
+   Recreate` below, the platform's refusal to grant any other workload a claim
+   on these volumes, and this repository's own refusal to let a composition
+   value ask for a second Pod. The lock is the last line under those, not a
+   substitute for them.
+
+   The host-directory condition constrains OTHER accounts only — it keeps uids
+   and gids that are not this workload off the path; it grants this workload's
+   own uid nothing it did not already have:
    `/mnt/local-pie-ssd/obsidian/obsync-blobs` and
    `/mnt/local-pie-ssd/obsidian/obsync-journal` created `65532:65532`, mode
    `0700`, with root-owned parents that are not group- or world-writable
    (sticky is acceptable) and no symlink anywhere on the path.
+
+   The first head to carry the lock, `snaraj/obsync` `9a5e96d`, left the
+   CROSS-ACCOUNT path open as well: the chart still set `fsGroup` and the
+   posture accepted a group-writable parent, so a process merely sharing a gid
+   could perform the same rename. The candidate head `ef01d5d` (group write
+   refused regardless of gid, canonical-path refusal, no `fsGroup`) repairs that
+   cross-account path **only** — the same-uid rename above is out of its reach
+   by construction. **This document cites `ef01d5d` as a CANDIDATE, not as an
+   established control: it is under review as this is written, and no activation
+   may rely on it until that review returns an APPROVE at an exact head.** The
+   reviewed head replaces this paragraph in the change that records it.
 2. **`replicas: 1` in the chart**, which is not overridable from here: the
    chart's values schema is closed and exposes no replica count, so no platform
    value can ask for two.

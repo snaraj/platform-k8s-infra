@@ -75,21 +75,25 @@ STORAGE_KIND_LINE = re.compile(
 # key is written `- persistentVolumeClaim:` and a pattern anchored on
 # whitespace alone matches nothing and guards nothing.
 # `ReadWriteOnce` excludes other NODES, not other Pods, so on a single-node
-# cluster it prevents no second writer at all. The single-writer boundary is the
-# server's own exclusive journal lock plus `replicas: 1` and `strategy:
-# Recreate` in the signed chart. This repository's part is narrow and exact: a
-# platform values block may not ASK for either, so no composition change can
-# weaken the boundary even if a future chart made them overridable.
-# Scoped to the VALUES block on purpose. `spec.upgrade.remediation.strategy` is
-# a helm-controller field the two active releases legitimately carry, and a
-# pattern that matched it would refuse the reviewed tree — a guard that cannot
-# be satisfied is not stricter, it is broken.
-VALUES_BLOCK = re.compile(r'(?ms)^  values:$(.*)\Z')
-# The keys that would ask a single-writer workload for a second Pod, compared
-# after normalisation rather than matched as raw text. Review finding: a regex
-# over the raw block was bypassed by `"replicas": 2`, because YAML and Helm read
-# a quoted key and a bare one as the same key while a text pattern does not.
+# cluster it prevents no second writer at all. Nor does the server's own journal
+# lock: it refuses COOPERATIVE duplicate starts, but a process with the same uid
+# owns the directory and can rename the lock aside. Excluding a second Pod is an
+# ADMISSION decision — `replicas: 1` and `strategy: Recreate` in the signed
+# chart, asserted by the platform over the rendered Deployment. This
+# repository's part is narrow and exact: a platform values block may not ASK for
+# either, so no composition change can weaken it even if a future chart made
+# them overridable.
+# The keys that would ask a single-writer workload for a second Pod.
 SECOND_POD_KEYS = frozenset({"replicas", "replicacount", "strategy", "updatestrategy"})
+# Every `spec` key at two-space indent, however it is spelled, so a QUOTED or
+# TAGGED `values` key is caught rather than silently unmatched.
+SPEC_KEY_LINE = re.compile(r'(?m)^  (?P<raw>[^\s#][^:]*?)\s*:\s*(?P<rest>.*)$')
+# The complete admissible grammar for one values line. Anything outside it is
+# REFUSED rather than skipped — see `parse_values_block`.
+VALUES_LINE = re.compile(
+    r'^(?P<indent> *)(?P<key>[A-Za-z][A-Za-z0-9]*):'
+    r'(?:[ ](?P<value>""|\[\]|[A-Za-z0-9][A-Za-z0-9._/:@+-]*))?$'
+)
 CLAIM_VOLUME_LINE = re.compile(
     r'^\s*(?:-\s+)?(?:persistentVolumeClaim|ephemeral|csi):\s*$', re.MULTILINE
 )
@@ -192,45 +196,97 @@ def identity_errors(payload: bytes, slug: str, repository: str) -> None:
         raise ValueError("publisher identity is not the declared application repository")
 
 
-def values_keys(block: str) -> set[str]:
-    """Every mapping key in a values block, normalised, at any depth.
+def parse_values_block(text: str) -> set[str]:
+    """Return every key in `spec.values`, or refuse the block outright.
 
-    A deliberately small reader rather than a YAML parser, and fail-closed in
-    the two directions that matter. Flow collections are REFUSED outright
-    instead of parsed, because `{replicas: 2}` on one line is the shape a
-    line-oriented reader is worst at and a values block has no need of it.
-    Quoting is stripped before comparison, because YAML and Helm read
-    `"replicas"`, `'replicas'` and `replicas` as one key while a text pattern
-    reads three.
+    This gate has no YAML parser: `make check` runs stdlib Python and invokes
+    neither helm nor yq, so there is nothing here that reads the document the
+    way its consumer does. A scanner that guesses at YAML is exactly how the
+    previous two versions of this guard were bypassed — first by a quoted key,
+    then by tags, complex keys, escapes and flow collections. So this does not
+    guess. It admits a CLOSED grammar and REFUSES everything else, including
+    forms that are perfectly valid YAML:
+
+      * keys are bare `[A-Za-z][A-Za-z0-9]*` — no quoting, no tag, no `?`
+        complex key, no escape, so `"replicas"`, `"replic\x61s"` and
+        `!!str replicas` are refused rather than normalised and possibly
+        normalised wrongly;
+      * values are a nested mapping, one plain scalar, `""`, or `[]` — no flow
+        collection, no anchor, no alias, no block scalar, no inline comment;
+      * indentation is exactly two spaces per level.
+
+    Refusing a valid form is the acceptable failure here: a composition that
+    needs one says so in review, and the alternative is a guard that reads a
+    document differently from the controller that will act on it.
     """
-    keys = set()
-    for line in block.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    keys: set[str] = set()
+    indents = [2]
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
             continue
-        if stripped.startswith(("{", "[")) or "{" in stripped or "&" in stripped or "*" in stripped:
-            raise ValueError("values block must not use flow collections, anchors or aliases")
-        if stripped.startswith("- "):
-            stripped = stripped[2:].strip()
-        if ":" not in stripped:
-            continue
-        key = stripped.split(":", 1)[0].strip()
-        if len(key) > 1 and key[0] == key[-1] and key[0] in "\"'":
-            key = key[1:-1]
-        keys.add(key.strip().lower())
+        match = VALUES_LINE.fullmatch(raw)
+        if match is None:
+            raise ValueError("values block uses a form this gate refuses to guess at")
+        indent = len(match.group("indent"))
+        if indent % 2 or indent < 4:
+            raise ValueError("values block indentation is outside the closed grammar")
+        while indents and indent < indents[-1]:
+            indents.pop()
+        if indent > indents[-1] + 2:
+            raise ValueError("values block indentation is outside the closed grammar")
+        if indent > indents[-1]:
+            indents.append(indent)
+        keys.add(match.group("key"))
     return keys
+
+
+def values_block(text: str) -> str:
+    """The `spec.values` block, refusing any spelling of the key but the bare one.
+
+    Quoting the outer key made the block VANISH from the previous scanner while
+    the consumer still resolved `.spec.values.replicas`. A missing block is
+    therefore not "nothing to check" — it is a release with no values at all, or
+    a key spelled a way this gate will not read, and both are refused.
+    """
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        match = SPEC_KEY_LINE.fullmatch(line)
+        if match is None:
+            continue
+        raw = match.group("raw").strip()
+        if raw == "values":
+            if match.group("rest"):
+                raise ValueError("values must open a block mapping")
+            start = index + 1
+            continue
+        if raw.strip("\"'") == "values" or raw.endswith("values"):
+            raise ValueError("values key must be spelled bare, without quoting or a tag")
+    if start is None:
+        raise ValueError("release has no spec.values block")
+    body = []
+    for line in lines[start:]:
+        if line.strip() and not line.startswith("    ") and not line.lstrip().startswith("#"):
+            break
+        body.append(line)
+    return "\n".join(body)
 
 
 def single_writer_errors(payload: bytes) -> None:
     """No composition value may ask a single-writer workload for a second Pod.
 
-    `ReadWriteOnce` is node exclusion, not Pod exclusion, so the boundary is the
-    server's own exclusive journal lock plus `replicas: 1` and `strategy:
-    Recreate` in the signed chart. This repository's narrow part is that no
-    values block may ASK for either, at any nesting depth and under any quoting.
+    `ReadWriteOnce` is node exclusion, not Pod exclusion, so this is not the
+    writer boundary — it is the one part of that boundary this repository can
+    hold: no values block may ASK for a second Pod, at any depth of the parsed
+    mapping.
+
+    Keys are compared case-folded, which is deliberately BROADER than the YAML
+    lookup the consumer performs: `REPLICAS` is a different key to Helm and
+    would not be read, but no reviewed chart here has two values keys differing
+    only in case, so a near-miss spelling is refused rather than reasoned about.
     """
-    block = VALUES_BLOCK.search(payload.decode("utf-8"))
-    if block and values_keys(block.group(1)) & SECOND_POD_KEYS:
+    keys = {key.casefold() for key in parse_values_block(values_block(payload.decode("utf-8")))}
+    if keys & SECOND_POD_KEYS:
         raise ValueError("composition must not set a replica count or rollout strategy")
 
 

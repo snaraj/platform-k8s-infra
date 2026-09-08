@@ -245,57 +245,87 @@ class CompositionTests(unittest.TestCase):
         composition.check(self.root)
 
     def test_composition_cannot_ask_for_a_second_pod(self):
-        """`ReadWriteOnce` is node exclusion, so this is not the boundary.
+        """`ReadWriteOnce` is node exclusion, so this is not the writer boundary.
 
-        On a single-node cluster two Pods can mount the same claim read-write.
-        The boundary is the server's exclusive journal lock plus `replicas: 1`
-        and `strategy: Recreate` in the signed chart; `ReadWriteOncePod` would
-        express one-Pod exclusivity but needs a CSI driver the local class does
-        not have. This repository's narrow part is that no values block may ASK
-        for a second Pod.
+        It is the one part of that boundary this repository holds: no values
+        block may ASK for a second Pod. Two review rounds bypassed the earlier
+        versions of this guard — first a quoted key past a raw-text regex, then
+        tags, complex keys, escapes and flow collections past a hand-rolled
+        scanner. This gate has no YAML parser (`make check` is stdlib Python and
+        invokes neither helm nor yq), so it no longer guesses: it admits a
+        closed grammar and REFUSES everything else, valid YAML included.
 
-        Every mutation is RE-PINNED before `check` runs. Review finding: the
-        first version of this guard was a regex over raw text, and
-        `"replicas": 2` walked past it — the byte hash caught that mutant, which
-        made the guard look alive while it was not. Re-pinning removes the hash
-        from the equation so only the guard is under test.
+        Every mutation is RE-PINNED before `check` runs, so the byte hash is out
+        of the equation and only the guard is under test. Both refusal messages
+        are accepted, because which one fires is a property of the form: a
+        spelling inside the grammar is caught by the key set, and one outside it
+        is caught by the grammar itself.
         """
 
         shapes_path = self.root / "policies/manifest-shapes.json"
-        hostile = (
+        refusal = (
+            "replica count or rollout strategy"
+            "|refuses to guess at"
+            "|outside the closed grammar"
+            "|spelled bare"
+            "|no spec.values block"
+        )
+        # Inside the grammar: caught by the key set.
+        plain = (
             "    replicas: 2",
+            "    replicaCount: 2",
+            "    strategy: RollingUpdate",
+            "    updateStrategy: RollingUpdate",
+            "    deployment:\n      replicas: 2",
+        )
+        # Outside it: caught by the grammar. Every form the review listed.
+        hostile = (
             '    "replicas": 2',
             "    'replicas': 2",
-            "    replicaCount: 2",
-            "    REPLICAS: 2",
-            "    strategy: RollingUpdate",
-            '    "strategy": RollingUpdate',
-            "    updateStrategy: RollingUpdate",
-            # Nested one level deeper: Helm reads this as a key too.
-            "    deployment:\n      replicas: 2",
-            # A flow mapping is refused outright rather than parsed.
+            '    "replic\\x61s": 2',
+            "    !!str replicas: 2",
+            "    ? replicas\n    : 2",
             "    deployment: {replicas: 2}",
+            "    deployment: [replicas: 2]",
+            "    REPLICAS: 2",
+            "    replicas: &anchor 2",
+            "    replicas: 2 # inline",
         )
         for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
             relative = f"kubernetes/websites/{slug}/release.yaml"
             path = self.root / relative
             original, original_shapes = path.read_text(), shapes_path.read_text()
             pending = slug in composition.PENDING_APPLICATIONS
-            for addition in hostile:
-                with self.subTest(slug=slug, mutation=addition.strip()):
-                    path.write_text(original.rstrip("\n") + "\n" + addition + "\n")
-                    shapes = json.loads(original_shapes)
-                    normalized, _, _ = composition.normalized_manifest(
-                        path.read_bytes(), False, pending
-                    )
-                    shapes[relative] = hashlib.sha256(normalized).hexdigest()
-                    shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
-                    with self.assertRaisesRegex(
-                        ValueError, "replica count or rollout strategy|flow collections"
-                    ):
+
+            def repin_and_expect(mutated_text, label):
+                path.write_text(mutated_text)
+                shapes = json.loads(original_shapes)
+                normalized, _, _ = composition.normalized_manifest(
+                    path.read_bytes(), False, pending
+                )
+                shapes[relative] = hashlib.sha256(normalized).hexdigest()
+                shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+                with self.subTest(slug=slug, mutation=label):
+                    with self.assertRaisesRegex(ValueError, refusal):
                         composition.check(self.root)
                 path.write_text(original)
                 shapes_path.write_text(original_shapes)
+
+            for addition in plain + hostile:
+                repin_and_expect(
+                    original.rstrip("\n") + "\n" + addition + "\n", addition.strip()
+                )
+
+            # Quoting the OUTER key made the block vanish from the previous
+            # scanner while the consumer still resolved `.spec.values.replicas`.
+            # A missing block is refused rather than treated as nothing to check.
+            for quoted in ('  "values":', "  'values':", "  !!map values:"):
+                repin_and_expect(
+                    original.replace("  values:", quoted, 1).rstrip("\n")
+                    + "\n    replicas: 2\n",
+                    quoted.strip(),
+                )
+
             # The sibling that must stay admissible: a guard that refused the
             # reviewed tree would be broken rather than stricter.
             self.assertIn("      strategy: rollback", original)
