@@ -232,6 +232,87 @@ class UpdatesTests(unittest.TestCase):
             updates.verify_delta(self.root, base, files)
 
 
+    # --- Pending applications never reach a proposal (issue #348) -----------
+
+    def test_the_drift_check_and_plan_see_active_applications_only(self):
+        """A pending application has no release to compare and none is invented.
+
+        `latest` requires the inventory it is handed to be EXACTLY the active
+        set, so a pending slug leaking into the selections would be a hard
+        refusal rather than a request to GitHub for a release that does not
+        exist. The positive half matters as much: the two active applications
+        must still be checked, or this would pass by checking nothing.
+        """
+
+        pending = sorted(updates.validate.PENDING_APPLICATIONS)
+        self.assertTrue(pending)
+        self.assertEqual(set(self.selections), set(updates.validate.APPLICATIONS))
+        for slug in pending:
+            self.assertNotIn(slug, self.selections)
+        status = updates.check_latest(self.root, self.github)
+        self.assertEqual(set(status["applications"]), set(updates.validate.APPLICATIONS))
+        for slug in pending:
+            self.assertNotIn(slug, status["applications"])
+        intruder = dict(self.selections)
+        intruder[pending[0]] = next(iter(self.selections.values()))
+        with self.assertRaisesRegex(ValueError, "inventory is not exact"):
+            updates.latest(intruder, self.github)
+
+    def test_a_proposal_cannot_write_a_pending_application_path(self):
+        """The allowed-path set is derived from ACTIVE applications only."""
+
+        env = updates.publication.git_environment()
+        def git(*args):
+            return subprocess.run(["git", "-C", str(self.root), *args], check=True,
+                                  capture_output=True, env=env).stdout.decode().strip()
+        git("init", "-b", "main")
+        git("add", ".")
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture")
+        base = git("rev-parse", "HEAD")
+        self.advance("naranjo-online")
+        (files, _), _acquire = self.plan()
+        for relative, payload in files.items():
+            (self.root / relative).write_bytes(payload)
+        updates.verify_delta(self.root, base, files)
+        # The mutation this has to survive is a WIDENED allowed set, not an
+        # extra file. Declaring the pending path in `files` too makes the
+        # changed-equals-planned check pass, so the only thing left standing
+        # between the proposal and a pending application is `allowed` itself.
+        for slug in sorted(updates.validate.PENDING_APPLICATIONS):
+            relative = f"kubernetes/websites/{slug}/source.yaml"
+            path = self.root / relative
+            original = path.read_bytes()
+            mutated = original.replace(
+                updates.validate.SENTINEL_DIGEST.encode(), b"sha256:" + b"1" * 64)
+            self.assertNotEqual(mutated, original)
+            path.write_bytes(mutated)
+            declared = {**files, relative: mutated}
+            with self.assertRaisesRegex(ValueError, "unexpected paths"):
+                updates.verify_delta(self.root, base, declared)
+            # And the undeclared form, which the equality arm catches instead.
+            with self.assertRaisesRegex(ValueError, "unexpected paths"):
+                updates.verify_delta(self.root, base, files)
+            path.write_bytes(original)
+
+    def test_the_publication_surface_admits_no_undeclared_application(self):
+        """A fourth directory is refused by the publication gate as well.
+
+        The composition inventory refuses it too, so neither gate is alone
+        load-bearing — which is the point: the publication allowlist is an
+        exact directory alternation rather than a wildcard, so a path that
+        passed the inventory by some future edit still cannot be published.
+        """
+
+        for slug in sorted(updates.validate.APPLICATIONS) + sorted(updates.validate.PENDING_APPLICATIONS):
+            updates.publication.path_allowed(
+                f"kubernetes/websites/{slug}/source.yaml")
+        for undeclared in ("undeclared", "obsync-staging", "naranjo-online-copy"):
+            with self.subTest(directory=undeclared):
+                with self.assertRaisesRegex(ValueError, "unexpected publication file"):
+                    updates.publication.path_allowed(
+                        f"kubernetes/websites/{undeclared}/source.yaml")
+
+
 class ProposalFlowTests(unittest.TestCase):
     setUp = UpdatesTests.setUp
     advance = UpdatesTests.advance

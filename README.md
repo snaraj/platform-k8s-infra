@@ -19,9 +19,15 @@ and verified against each application's exact publisher identity.
 ## Application composition
 
 Application manifests live in `kubernetes/websites/`. Each application has an
-OCI chart source, a Helm release and a default-deny network policy. The current
+OCI chart source, a Helm release and a default-deny network policy. The active
 applications are naranjo.online and lidersea.com. Their selected source, chart
 and image bindings are recorded in the [acquisition receipt](docs/assurance/195-chart-acquisition-receipt.json).
+
+`obsync` is composed but **pending**: its publisher has cut no release, so its
+selection is the fail-closed sentinel digest, its release is suspended and not
+ready, and it holds no receipt record. It deploys nothing, and the validator
+requires exactly that state until one reviewed change promotes it. The decision
+admitting it is [docs/decisions/2026-09-07-obsync-workload.md](docs/decisions/2026-09-07-obsync-workload.md).
 
 The verifier checks the allowed manifest boundary and independently reproduces
 the acquisition receipt from public artifacts. Verification covers chart and

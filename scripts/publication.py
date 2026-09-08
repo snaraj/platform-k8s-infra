@@ -21,7 +21,12 @@ ROOT_FILES = {"README.md", "AGENTS.md", "SECURITY.md", "Makefile", ".gitignore"}
 PATHS = re.compile(r"(?:scripts/[a-z0-9_/-]+\.(?:py|sh)|tests/test_[a-z0-9_]+\.py|"
                    r"policies/[a-z0-9_-]+\.(?:json|toml)|docs/[a-z0-9_/-]+\.(?:json|md)|"
                    r"\.github/workflows/[a-z0-9_-]+\.yml|\.github/CODEOWNERS|\.github/dependabot\.yml|\.githooks/pre-push|"
-                   r"kubernetes/websites/(?:naranjo-online|lidersea-com)/[a-z-]+\.yaml)")
+                   # Exact directory alternation, never a wildcard: the publication
+                   # surface is the last place a new path should be admitted by
+                   # pattern. `obsync` is the pending third application; a fourth
+                   # directory is refused here as well as by the composition
+                   # inventory, so neither gate alone is load-bearing.
+                   r"kubernetes/websites/(?:naranjo-online|lidersea-com|obsync)/[a-z-]+\.yaml)")
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 IPV4 = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
 IPV6 = re.compile(r"(?<![\w:])(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(?![\w:])")
