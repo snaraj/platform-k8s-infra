@@ -1,6 +1,6 @@
 {
   "chartLayerMediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-  "capturedDate": "2026-09-07",
+  "capturedDate": "2026-09-08",
   "records": {
     "lidersea-com": {
       "arm64Digest": "sha256:c10d8bda7dfb1630f10e3baf2927c23fb3ab3f9fd95996fc496cf9bd3d65c38b",
@@ -16,17 +16,17 @@
       "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.43@sha256:d193ddd595f823c188bd87b53ce4b19ea7003c8dbd4504a7b2b919ef32b84309"
     },
     "naranjo-online": {
-      "arm64Digest": "sha256:6e3c2d23ad04a61aa22d3c123802922c4d1360e8ca10c0635fe3511ad94ac786",
-      "chart": {"appVersion": "0.1.80", "name": "naranjo-online", "version": "0.1.80"},
-      "chartConfigDigest": "sha256:c3c21cbc2b029703ef13dda2818d296282ad0ca8f3df65bc424fe81998622c4f",
-      "chartLayerDigest": "sha256:c9a3ee1272562dd7ab38d3ab834e491f8c689a799ee33eec56fa3fc9937ebe7f",
+      "arm64Digest": "sha256:e45bc9b035cce63db58dbe928cc4cf5e01f31bfb6e33ca55bfe11badb6607ff6",
+      "chart": {"appVersion": "0.1.81", "name": "naranjo-online", "version": "0.1.81"},
+      "chartConfigDigest": "sha256:5431f89c719cfe739a28635f40cf71e3f676a46d089e5623af2deb5ac63bab36",
+      "chartLayerDigest": "sha256:89b530320df461e01ea273d9f62d66dfff42578548433086c32104f081701ee4",
       "chartRepository": "ghcr.io/snaraj/charts/naranjo-online",
-      "chartTag": "0.1.80",
-      "manifestDigest": "sha256:a665c74985b0dc3e9b8351c0306d58f8d318a581f7fdda71874a98fde85773f3",
+      "chartTag": "0.1.81",
+      "manifestDigest": "sha256:1e4dd0fc2a153b11e1143ef7f5de7cf1a780a89cdbbd1beb6ae7d67a91cd981b",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:61825308c6290fb46f38b58c92c451b1c826b0474ca98ce911f7785ac3a0c135", "sourceSha": "6ce0887c38b5f70ceff7d75f3cc1a91dd6947093"},
+      "release": {"assetDigest": "sha256:aad625e9edaab7f69b4b52d8beda4eca25ac9373575524068609c6e3494620f2", "sourceSha": "3c8a02aa3c50205340128436dfc2fc945c3a7564"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/naranjo.online/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.80@sha256:63236d492c84e7d0e48f3e8b8c1b7551053defbd6461e27a3b3e6e5c1559f05f"
+      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.81@sha256:b01d63c777ecca15e5a84b6b8a3e2a399a4ee557e8b2d64cf9358505d31243f8"
     }
   },
   "schema": "dev.snaraj.chart-acquisition-receipt/v2",
