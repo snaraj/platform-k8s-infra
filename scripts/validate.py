@@ -53,6 +53,7 @@ FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml
 NAMESPACES = {"lidersea-com": "lidersea-com", "naranjo-online": "naranjo-online",
               "obsync": "obsidian"}
 HELM_CHART_MEDIA_TYPE = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+REVIEWED_ISSUER = r"^https://token\.actions\.githubusercontent\.com$"
 # The exact object each file must name: API version, kind, `metadata.name`
 # template, the complete set of top-level keys, and the complete set of `spec`
 # keys. Both sets are equality, not containment, because a HelmRelease can ask
@@ -73,7 +74,9 @@ ENVELOPES = {
                     {"ref": (frozenset({"digest"}), {}),
                      "layerSelector": (frozenset({"mediaType", "operation"}),
                                        {"mediaType": HELM_CHART_MEDIA_TYPE,
-                                        "operation": "copy"})}),
+                                        "operation": "copy"}),
+                     "verify": (frozenset({"matchOIDCIdentity", "provider"}),
+                                {"provider": "cosign"})}),
     "release.yaml": ("helm.toolkit.fluxcd.io/v2", "HelmRelease", "{slug}",
                      frozenset({"apiVersion", "kind", "metadata", "spec"}),
                      frozenset({"chartRef", "driftDetection", "install", "interval",
@@ -319,7 +322,33 @@ def sole_key(numbered: list[tuple[int, str]], wanted: str) -> None:
         raise ValueError(f"file must hold exactly one {wanted} key, found {len(seen)}")
 
 
-def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, str]] | None:
+def reviewed_matcher_errors(verify_body, opener: int, repository: str) -> None:
+    """The verify matcher list, closed whole rather than searched.
+
+    Flux evaluates `matchOIDCIdentity` entries with OR, so one permissive entry
+    admits any keyless signer, and a guard that finds the reviewed matcher and
+    stops has proved nothing about the ones beside it — which is exactly how a
+    `- {issuer: '.*', subject: '.*'}` appended below it went unseen. So the list
+    is not searched: its whole body must be the two reviewed lines, compared
+    with their indentation, their dash and their exact values.
+    """
+    expected = (
+        "      - issuer: " + REVIEWED_ISSUER,
+        "        subject: " + publisher_subject("snaraj/" + repository),
+    )
+    body = [(number, raw) for number, raw in block_body(verify_body, opener, 4)
+            if raw.strip() and not raw.lstrip().startswith("#")]
+    for index, wanted in enumerate(expected):
+        if index >= len(body):
+            raise ValueError(f"line {opener}: spec.verify.matchOIDCIdentity is missing the reviewed matcher")
+        number, raw = body[index]
+        if raw != wanted:
+            raise ValueError(f"line {number}: spec.verify.matchOIDCIdentity is not the reviewed matcher")
+    if len(body) > len(expected):
+        raise ValueError(f"line {body[len(expected)][0]}: spec.verify.matchOIDCIdentity admits a second matcher")
+
+
+def manifest_envelope(payload: bytes, name: str, slug: str, repository: str) -> list[tuple[int, str]] | None:
     """Close the document and its envelope; return the `spec` block, if any.
 
     Closure runs outside in — one document, then the exact top-level keys, then
@@ -375,7 +404,8 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
         missing = ", ".join(sorted(spec_keys - set(declared)))
         raise ValueError(f"{name} is missing spec keys of the reviewed {kind}: {missing}")
     for key, (fields, constants) in fetch_fields.items():
-        observed = bare_keys(block_body(spec_lines, declared[key][0], 2), 4, f"spec.{key}")
+        body = block_body(spec_lines, declared[key][0], 2)
+        observed = bare_keys(body, 4, f"spec.{key}")
         for extra in sorted(set(observed) - fields):
             raise ValueError(f"line {observed[extra][0]}: {extra} is not a spec.{key} field of the reviewed {kind}")
         if fields - set(observed):
@@ -385,6 +415,8 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
             wanted = constant.format(slug=slug)
             if observed[field][1] != wanted:
                 raise ValueError(f"line {observed[field][0]}: spec.{key}.{field} is not the reviewed {wanted}")
+        if key == "verify":
+            reviewed_matcher_errors(body, observed["matchOIDCIdentity"][0], repository)
     return spec_lines
 
 
@@ -510,7 +542,7 @@ def check(root: Path = ROOT) -> tuple[dict, dict]:
         # Before closure, deliberately: this is a deny-if-present scan over raw
         # bytes, and extra documents can only ADD matches to it, never hide one.
         storage_activation_errors(payload)
-        spec_lines = manifest_envelope(payload, path.name, slug)
+        spec_lines = manifest_envelope(payload, path.name, slug, inventory[slug])
         if path.name == "release.yaml":
             single_writer_errors(payload, spec_lines)
         if pending and path.name == "release.yaml":

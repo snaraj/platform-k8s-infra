@@ -72,6 +72,8 @@ class CompositionTests(unittest.TestCase):
                         "reviewed application boundary"
                         "|is not a spec key of the reviewed"
                         "|is not a spec.chartRef field of the reviewed"
+                        "|is not the reviewed matcher"
+                        "|spec.verify.provider is not the reviewed"
                         "|does not compose exactly the other files",
                     ):
                         composition.check(self.root)
@@ -193,8 +195,12 @@ class CompositionTests(unittest.TestCase):
                     original = dict(declared)
                     try:
                         declared[slug] = "foreign-publisher"
+                        # Two readings derive from this value now: the matcher
+                        # closure, which reaches it first, and the identity
+                        # binding behind it. Either firing proves the point.
                         with self.assertRaisesRegex(
-                            ValueError, "declared application repository"
+                            ValueError,
+                            "declared application repository|is not the reviewed matcher",
                         ):
                             composition.check(self.root)
                     finally:
@@ -224,15 +230,19 @@ class CompositionTests(unittest.TestCase):
             for label, before, after, expected in (
                 ("foreign chart repository", url,
                  "oci://ghcr.io/snaraj/charts/foreign", "chart repository is not the declared"),
+                # The matcher-list closure reaches these first now, and says so
+                # by naming the list rather than the declaration. Both readings
+                # are kept: the closure is positional and exact, the identity
+                # binding derives the same subject from the declared repository.
                 ("foreign publisher", subject,
                  subject.replace("release-publisher", "foreign-publisher"),
-                 "publisher identity is not the declared"),
+                 "publisher identity is not the declared|is not the reviewed matcher"),
                 # An unescaped dot matches ANY character, so `naranjoXonline`
                 # would verify against a subject that reads identical.
                 ("unescaped dot", subject, subject.replace("\\.", "."),
-                 "publisher identity is not the declared"),
+                 "publisher identity is not the declared|is not the reviewed matcher"),
                 ("unanchored subject", subject, subject.rstrip("$"),
-                 "publisher identity is not the declared"),
+                 "publisher identity is not the declared|is not the reviewed matcher"),
             ):
                 if before == after:
                     continue
@@ -574,6 +584,70 @@ spec:
              "chartRef.kind"),
         ):
             refuse(name, before, after, expected, label)
+        composition.check(self.root)
+
+    def test_a_second_signer_matcher_cannot_be_smuggled_beside_the_reviewed_one(self):
+        """Flux ORs the matchers, so a permissive one admits any keyless signer.
+
+        Round 5: `- {issuer: '.*', subject: '.*'}` appended under
+        `matchOIDCIdentity`, re-pinned, and `check` returned success — the
+        identity binding reads the reviewed `subject:` line and asserts the match
+        list equals one entry, so a matcher in a form that regex does not match
+        is invisible to it. The list is now closed WHOLE: its body is exactly the
+        two reviewed lines, compared with indentation, dash and value, so the
+        reviewed matcher being present proves nothing on its own.
+
+        Each fixture is RE-PINNED before `check` runs.
+        """
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        slug = self.pending_slug()
+        relative = f"kubernetes/websites/{slug}/source.yaml"
+        path = self.root / relative
+        original, shapes_source = path.read_text(), shapes_path.read_text()
+        subject = original[original.index("        subject: "):].splitlines()[0]
+
+        def refuse(mutated, expected, label):
+            path.write_text(mutated)
+            shapes = json.loads(shapes_source)
+            normalized, _, _ = composition.normalized_manifest(path.read_bytes(), True, True)
+            shapes[relative] = hashlib.sha256(normalized).hexdigest()
+            shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+            with self.subTest(fixture=label):
+                with self.assertRaisesRegex(ValueError, expected):
+                    composition.check(self.root)
+            path.write_text(original)
+            shapes_path.write_text(shapes_source)
+
+        # The reviewer's own case: the reviewed matcher is left untouched, so
+        # only a whole-list closure can catch this file.
+        smuggled = original.replace(
+            subject + "\n", subject + "\n      - {issuer: '.*', subject: '.*'}\n", 1)
+        self.assertIn(subject, smuggled)
+        self.assertIn("      - issuer: ", smuggled)
+
+        for mutated, expected, label in (
+            (smuggled, "admits a second matcher", "the reviewer's flow-style second matcher"),
+            (original.replace(subject + "\n", subject + "\n" + subject.replace(
+                "        subject: ", "      - issuer: ") + "\n" + subject + "\n", 1),
+             "admits a second matcher", "a second block-form matcher"),
+            (original.replace(subject, "        subject: >-\n          ^https://github\\.com/.*$", 1),
+             "is not the reviewed matcher", "a folded multiline subject"),
+            (original.replace("      - issuer: ^https", "      - issuer: ^http://token", 1),
+             "is not the reviewed matcher", "a changed issuer"),
+            (original.replace("snaraj/obsync/", "snaraj/naranjo.online/", 1),
+             "is not the reviewed matcher", "another repository's publisher"),
+            (original.replace("    provider: cosign", "    provider: keyless", 1),
+             "spec.verify.provider is not the reviewed cosign", "provider: keyless"),
+            (original.replace("    provider: cosign",
+                              "    secretRef:\n      name: registry\n    provider: cosign", 1),
+             "secretRef is not a spec.verify field of the reviewed OCIRepository",
+             "an extra verify key"),
+            (original.replace("      - issuer: ^https", "#     - issuer: ^https", 1).replace(
+                subject, "#" + subject[1:], 1),
+             "is missing the reviewed matcher", "matchOIDCIdentity emptied"),
+        ):
+            refuse(mutated, expected, label)
         composition.check(self.root)
 
     def test_an_application_cannot_be_active_and_pending_at_once(self):
