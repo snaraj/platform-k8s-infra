@@ -267,8 +267,9 @@ class CompositionTests(unittest.TestCase):
             "replica count or rollout strategy"
             "|refuses to guess at"
             "|outside the closed grammar"
-            "|spelled bare"
-            "|no spec.values block"
+            "|bare, unquoted, untagged spelling"
+            "|exactly one values key"
+            "|no bare spec.values block"
         )
         # Inside the grammar: caught by the key set.
         plain = (
@@ -329,6 +330,94 @@ class CompositionTests(unittest.TestCase):
             # The sibling that must stay admissible: a guard that refused the
             # reviewed tree would be broken rather than stricter.
             self.assertIn("      strategy: rollback", original)
+        composition.check(self.root)
+
+    def test_a_decoy_document_cannot_answer_for_the_release_it_shadows(self):
+        """The inventory closes files, so the guard has to close objects itself.
+
+        Review round 4: a two-document release whose real HelmRelease spells its
+        outer key `"values"` and carries `replicas: 2`, followed by a decoy whose
+        bare `values:` is the only one a file-wide scan finds. Every field-level
+        guard reported the decoy while the consumer resolved the primary, and
+        `check` accepted. Closure now runs outside in — one document, then the
+        exact top-level keys, then the exact kind, name and namespace — so a
+        decoy is refused for naming the wrong thing before any field is read.
+
+        Each fixture is RE-PINNED before `check` runs, so nothing here is caught
+        by the byte hash, and each names what was closed.
+        """
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        slug = self.pending_slug()
+        relative = f"kubernetes/websites/{slug}/release.yaml"
+        path = self.root / relative
+        original, original_shapes = path.read_text(), shapes_path.read_text()
+
+        decoy = """---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: obsync-values-guard
+  "namespace": obsidian
+spec:
+  "suspend": false
+  "serviceAccountName": obsync-helm-reconciler
+  chartRef:
+    kind: OCIRepository
+    "name": obsync-chart
+  values:
+    publicUrl: ""
+"""
+        # The escape is the point: `"valu\\x65s"` is neither a bare key nor a
+        # quoted spelling of one, so the round-3 scanner skipped it, found the
+        # decoy's bare `values:`, and reported a block the consumer never reads.
+        escaped = '  "valu' + chr(92) + 'x65s":'
+        primary = original.replace("  values:", escaped + "\n    replicas: 2", 1)
+        two_documents = primary + decoy
+
+        # The decoy is what a file-wide scan would have read, and on its own it
+        # asks for nothing: only document closure catches this file.
+        self.assertIn(escaped, two_documents)
+        self.assertIn("\n  values:\n    publicUrl:", decoy)
+        self.assertNotIn(
+            "replicas",
+            "\n".join(line for line in decoy.splitlines() if line.startswith("    ")),
+        )
+
+        fixtures = (
+            ("the reviewer's two-document decoy", two_documents,
+             "exactly one YAML document"),
+            ("a document terminator", original.rstrip("\n") + "\n...\n",
+             "exactly one YAML document"),
+            ("a YAML directive", "%YAML 1.2\n" + original,
+             "a YAML directive is outside the closed document form"),
+            ("a second top-level spec", original.rstrip("\n") + "\nspec:\n  suspend: true\n",
+             "duplicate top-level key spec"),
+            ("a second values key", original.replace(
+                "  values:", "  values:\n    publicUrl: \"\"\n  values:", 1),
+             "exactly one values key"),
+            ("an unexpected top-level key", original.rstrip("\n") + "\nstatus:\n  observed: true\n",
+             "exact top-level keys of a HelmRelease"),
+            ("the wrong kind", original.replace("kind: HelmRelease", "kind: HelmChart", 1),
+             "does not name a helm.toolkit.fluxcd.io/v2 HelmRelease"),
+            ("the wrong namespace", original.replace(
+                "  namespace: obsidian", "  namespace: kube-system", 1),
+             "does not name obsidian/obsync"),
+            ("a quoted metadata name", original.replace(
+                "  name: obsync\n", '  "name": obsync\n', 1),
+             "metadata key is not a bare, unquoted, untagged spelling"),
+        )
+        for label, mutated, expected in fixtures:
+            path.write_text(mutated)
+            shapes = json.loads(original_shapes)
+            normalized, _, _ = composition.normalized_manifest(path.read_bytes(), False, True)
+            shapes[relative] = hashlib.sha256(normalized).hexdigest()
+            shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+            with self.subTest(fixture=label):
+                with self.assertRaisesRegex(ValueError, expected):
+                    composition.check(self.root)
+            path.write_text(original)
+            shapes_path.write_text(original_shapes)
         composition.check(self.root)
 
     def test_an_application_cannot_be_active_and_pending_at_once(self):
@@ -430,7 +519,9 @@ class CompositionTests(unittest.TestCase):
             with self.subTest(mutation=after):
                 self.assertEqual(original.count(before), 1)
                 path.write_text(original.replace(before, after))
-                with self.assertRaisesRegex(ValueError, "reviewed application boundary"):
+                with self.assertRaisesRegex(
+                    ValueError, "reviewed application boundary|does not name obsidian/obsync"
+                ):
                     composition.check(self.root)
             path.write_text(original)
 

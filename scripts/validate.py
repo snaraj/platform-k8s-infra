@@ -46,6 +46,25 @@ APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.onlin
 PENDING_APPLICATIONS = {"obsync": "obsync"}
 
 FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml")
+# The namespace each application composes into. `obsync` is the one slug whose
+# namespace is not its own name: the owner's `obsidian` namespace may later hold
+# other Obsidian-related workloads, and nothing about this application is
+# derived from it. Envelope closure below reads this map, so it cannot rot.
+NAMESPACES = {"lidersea-com": "lidersea-com", "naranjo-online": "naranjo-online",
+              "obsync": "obsidian"}
+# The exact object each file must name: API version, kind, `metadata.name`
+# template, and the complete set of top-level keys. A file that names anything
+# else is refused before a single field inside it is read.
+ENVELOPES = {
+    "kustomization.yaml": ("kustomize.config.k8s.io/v1beta1", "Kustomization", None,
+                           frozenset({"apiVersion", "kind", "resources"})),
+    "default-deny.yaml": ("networking.k8s.io/v1", "NetworkPolicy", "default-deny",
+                          frozenset({"apiVersion", "kind", "metadata", "spec"})),
+    "source.yaml": ("source.toolkit.fluxcd.io/v1", "OCIRepository", "{slug}-chart",
+                    frozenset({"apiVersion", "kind", "metadata", "spec"})),
+    "release.yaml": ("helm.toolkit.fluxcd.io/v2", "HelmRelease", "{slug}",
+                     frozenset({"apiVersion", "kind", "metadata", "spec"})),
+}
 RECEIPT = Path("docs/assurance/195-chart-acquisition-receipt.json")
 VERSION_LINE = re.compile(r'^    platform\.snaraj\.dev/chart-release: "([0-9.]+)"$', re.MULTILINE)
 DIGEST_LINE = re.compile(r'^    digest: (sha256:[0-9a-f]{64})$', re.MULTILINE)
@@ -85,9 +104,14 @@ STORAGE_KIND_LINE = re.compile(
 # them overridable.
 # The keys that would ask a single-writer workload for a second Pod.
 SECOND_POD_KEYS = frozenset({"replicas", "replicacount", "strategy", "updatestrategy"})
-# Every `spec` key at two-space indent, however it is spelled, so a QUOTED or
-# TAGGED `values` key is caught rather than silently unmatched.
-SPEC_KEY_LINE = re.compile(r'(?m)^  (?P<raw>[^\s#][^:]*?)\s*:\s*(?P<rest>.*)$')
+# The closed file set closes FILES, not YAML objects, so until a file is closed
+# to one document naming one expected object, every field read below can be
+# answered by a decoy the consumer never reads. These four close it in that
+# order: document, envelope, then values.
+DOCUMENT_BREAK = re.compile(r'^(?:---|\.\.\.)')
+KEY_LINE = re.compile(r'^(?P<indent> *)(?P<key>[^\s#][^:]*?)\s*:\s*(?P<rest>.*)$')
+BARE_KEY = re.compile(r'[A-Za-z][A-Za-z0-9]*')
+BARE_SCALAR = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]*')
 # The complete admissible grammar for one values line. Anything outside it is
 # REFUSED rather than skipped — see `parse_values_block`.
 VALUES_LINE = re.compile(
@@ -196,16 +220,148 @@ def identity_errors(payload: bytes, slug: str, repository: str) -> None:
         raise ValueError("publisher identity is not the declared application repository")
 
 
-def parse_values_block(text: str) -> set[str]:
+def closed_document(text: str) -> list[tuple[int, str]]:
+    """One YAML document per allowed file, numbered for the refusals below.
+
+    The inventory closes FILES. A file may still hold any number of documents,
+    and a review that reads the first one is answering about a different object
+    from the controller that reconciles the last. A two-document release whose
+    real HelmRelease spells its outer key `"values"` and whose decoy holds the
+    only bare `values:` block is accepted by every field-level guard and rejected
+    by this one, so this runs before any field is read.
+    """
+    numbered = []
+    for number, raw in enumerate(text.splitlines(), 1):
+        if raw.startswith("%"):
+            raise ValueError(f"line {number}: a YAML directive is outside the closed document form")
+        if DOCUMENT_BREAK.match(raw):
+            raise ValueError(f"line {number}: an allowed file holds exactly one YAML document")
+        numbered.append((number, raw))
+    return numbered
+
+
+def block_body(numbered: list[tuple[int, str]], opener: int, indent: int) -> list[tuple[int, str]]:
+    """The lines strictly inside the block opened at line `opener`."""
+    body, started = [], False
+    for number, raw in numbered:
+        if number == opener:
+            started = True
+            continue
+        if not started:
+            continue
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            body.append((number, raw))
+            continue
+        if len(raw) - len(raw.lstrip(" ")) <= indent:
+            break
+        body.append((number, raw))
+    return body
+
+
+def bare_keys(numbered: list[tuple[int, str]], indent: int, where: str) -> dict[str, tuple[int, str]]:
+    """Every key at one depth, refusing any spelling that is not bare."""
+    found: dict[str, tuple[int, str]] = {}
+    for number, raw in numbered:
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if len(raw) - len(raw.lstrip(" ")) != indent:
+            continue
+        match = KEY_LINE.fullmatch(raw)
+        if match is None:
+            raise ValueError(f"line {number}: {where} holds a form this gate refuses to read")
+        key = match.group("key")
+        if BARE_KEY.fullmatch(key) is None:
+            raise ValueError(f"line {number}: {where} key is not a bare, unquoted, untagged spelling")
+        if key in found:
+            raise ValueError(f"line {number}: duplicate {where} key {key}")
+        found[key] = (number, match.group("rest"))
+    return found
+
+
+def sole_key(numbered: list[tuple[int, str]], wanted: str) -> None:
+    """`wanted` appears once in the file, at any depth and however it is spelled."""
+    seen = []
+    for number, raw in numbered:
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        match = KEY_LINE.fullmatch(raw)
+        if match is None:
+            continue
+        key = match.group("key").strip()
+        if key.startswith("!") and " " in key:
+            key = key.split(None, 1)[1]
+        if key.strip("\"'").lstrip("?").strip() == wanted:
+            seen.append(number)
+    if len(seen) != 1:
+        raise ValueError(f"file must hold exactly one {wanted} key, found {len(seen)}")
+
+
+def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, str]] | None:
+    """Close the document and its envelope; return the `spec` block, if any.
+
+    Closure runs outside in — one document, then the exact top-level keys, then
+    the exact GVK, name and namespace the inventory expects for this file —
+    because each step is what makes the next one meaningful. A decoy object is
+    refused here for naming the wrong thing, not later for holding the wrong
+    field, and the values guard below is reachable only through this function.
+    """
+    api_version, kind, name_template, top_keys = ENVELOPES[name]
+    numbered = closed_document(payload.decode("utf-8"))
+    top: dict[str, tuple[int, str]] = {}
+    for number, raw in numbered:
+        if not raw.strip() or raw.lstrip().startswith("#") or raw.startswith(" "):
+            continue
+        match = KEY_LINE.fullmatch(raw)
+        if match is None:
+            raise ValueError(f"line {number}: top level is not a key")
+        key = match.group("key")
+        if BARE_KEY.fullmatch(key) is None:
+            raise ValueError(f"line {number}: top-level key is not a bare, unquoted, untagged spelling")
+        if key in top:
+            raise ValueError(f"line {number}: duplicate top-level key {key}")
+        top[key] = (number, match.group("rest"))
+    if set(top) != top_keys:
+        raise ValueError(f"{name} does not carry the exact top-level keys of a {kind}")
+    if top["apiVersion"][1] != api_version or top["kind"][1] != kind:
+        raise ValueError(f"{name} does not name a {api_version} {kind}")
+    if name_template is None:
+        return None
+    sole_key(numbered, "spec")
+    if top["metadata"][1] or top["spec"][1]:
+        raise ValueError(f"{name} metadata and spec must open block mappings")
+    fields = bare_keys(block_body(numbered, top["metadata"][0], 0), 2, "metadata")
+    expected = (name_template.format(slug=slug), NAMESPACES[slug])
+    observed = (fields.get("name", (0, ""))[1], fields.get("namespace", (0, ""))[1])
+    if any(BARE_SCALAR.fullmatch(value) is None for value in observed) or observed != expected:
+        raise ValueError(f"{name} does not name {expected[1]}/{expected[0]}")
+    return block_body(numbered, top["spec"][0], 0)
+
+
+def values_body(spec_lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """The `values` block, read only as the bare two-space key of the closed spec.
+
+    The predecessor scanned the whole file for a bare `values:` and kept the
+    first one it liked, which bound the guard to no object at all.
+    """
+    keys = bare_keys(spec_lines, 2, "spec")
+    if "values" not in keys:
+        raise ValueError("release has no bare spec.values block")
+    opener, rest = keys["values"]
+    if rest:
+        raise ValueError(f"line {opener}: values must open a block mapping")
+    return block_body(spec_lines, opener, 2)
+
+
+def parse_values_block(body: list[tuple[int, str]]) -> set[str]:
     """Return every key in `spec.values`, or refuse the block outright.
 
     This gate has no YAML parser: `make check` runs stdlib Python and invokes
     neither helm nor yq, so there is nothing here that reads the document the
     way its consumer does. A scanner that guesses at YAML is exactly how the
-    previous two versions of this guard were bypassed — first by a quoted key,
-    then by tags, complex keys, escapes and flow collections. So this does not
-    guess. It admits a CLOSED grammar and REFUSES everything else, including
-    forms that are perfectly valid YAML:
+    earlier versions of this guard were bypassed — a quoted key, then tags,
+    complex keys, escapes and flow collections. So this does not guess. It
+    admits a CLOSED grammar and REFUSES everything else, including forms that
+    are perfectly valid YAML:
 
       * keys are bare `[A-Za-z][A-Za-z0-9]*` — no quoting, no tag, no `?`
         complex key, no escape, so `"replicas"`, `"replic\x61s"` and
@@ -221,58 +377,26 @@ def parse_values_block(text: str) -> set[str]:
     """
     keys: set[str] = set()
     indents = [2]
-    for raw in text.splitlines():
+    for number, raw in body:
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         match = VALUES_LINE.fullmatch(raw)
         if match is None:
-            raise ValueError("values block uses a form this gate refuses to guess at")
+            raise ValueError(f"line {number}: values block uses a form this gate refuses to guess at")
         indent = len(match.group("indent"))
         if indent % 2 or indent < 4:
-            raise ValueError("values block indentation is outside the closed grammar")
+            raise ValueError(f"line {number}: values block indentation is outside the closed grammar")
         while indents and indent < indents[-1]:
             indents.pop()
         if indent > indents[-1] + 2:
-            raise ValueError("values block indentation is outside the closed grammar")
+            raise ValueError(f"line {number}: values block indentation is outside the closed grammar")
         if indent > indents[-1]:
             indents.append(indent)
         keys.add(match.group("key"))
     return keys
 
 
-def values_block(text: str) -> str:
-    """The `spec.values` block, refusing any spelling of the key but the bare one.
-
-    Quoting the outer key made the block VANISH from the previous scanner while
-    the consumer still resolved `.spec.values.replicas`. A missing block is
-    therefore not "nothing to check" — it is a release with no values at all, or
-    a key spelled a way this gate will not read, and both are refused.
-    """
-    lines = text.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        match = SPEC_KEY_LINE.fullmatch(line)
-        if match is None:
-            continue
-        raw = match.group("raw").strip()
-        if raw == "values":
-            if match.group("rest"):
-                raise ValueError("values must open a block mapping")
-            start = index + 1
-            continue
-        if raw.strip("\"'") == "values" or raw.endswith("values"):
-            raise ValueError("values key must be spelled bare, without quoting or a tag")
-    if start is None:
-        raise ValueError("release has no spec.values block")
-    body = []
-    for line in lines[start:]:
-        if line.strip() and not line.startswith("    ") and not line.lstrip().startswith("#"):
-            break
-        body.append(line)
-    return "\n".join(body)
-
-
-def single_writer_errors(payload: bytes) -> None:
+def single_writer_errors(payload: bytes, spec_lines: list[tuple[int, str]]) -> None:
     """No composition value may ask a single-writer workload for a second Pod.
 
     `ReadWriteOnce` is node exclusion, not Pod exclusion, so this is not the
@@ -285,7 +409,8 @@ def single_writer_errors(payload: bytes) -> None:
     would not be read, but no reviewed chart here has two values keys differing
     only in case, so a near-miss spelling is refused rather than reasoned about.
     """
-    keys = {key.casefold() for key in parse_values_block(values_block(payload.decode("utf-8")))}
+    sole_key(closed_document(payload.decode("utf-8")), "values")
+    keys = {key.casefold() for key in parse_values_block(values_body(spec_lines))}
     if keys & SECOND_POD_KEYS:
         raise ValueError("composition must not set a replica count or rollout strategy")
 
@@ -331,9 +456,12 @@ def check(root: Path = ROOT) -> tuple[dict, dict]:
         slug = path.parent.name
         pending = slug in PENDING_APPLICATIONS
         payload = read_file(root, path)
+        # Before closure, deliberately: this is a deny-if-present scan over raw
+        # bytes, and extra documents can only ADD matches to it, never hide one.
         storage_activation_errors(payload)
+        spec_lines = manifest_envelope(payload, path.name, slug)
         if path.name == "release.yaml":
-            single_writer_errors(payload)
+            single_writer_errors(payload, spec_lines)
         if pending and path.name == "release.yaml":
             pending_release_errors(payload)
         normalized, version, digest = normalized_manifest(
