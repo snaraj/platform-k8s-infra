@@ -71,6 +71,7 @@ class CompositionTests(unittest.TestCase):
                         ValueError,
                         "reviewed application boundary"
                         "|is not a spec key of the reviewed"
+                        "|is not a spec.chartRef field of the reviewed"
                         "|does not compose exactly the other files",
                     ):
                         composition.check(self.root)
@@ -515,6 +516,66 @@ spec:
             refuse(name, mutate, expected, label)
         composition.check(self.root)
 
+    def test_a_fetch_path_field_the_reviewed_manifest_does_not_carry_is_refused(self):
+        """Depth-2 closure left the three fields that decide WHAT is fetched.
+
+        Two survivors were run before this closure existed and both were
+        admitted with a re-pinned shape hash: `ref.tag` beside the pinned
+        digest, and a `layerSelector.mediaType` that no longer selects a Helm
+        chart. `chartRef.namespace` is the third: it points the release at
+        another namespace's source. The values path is closed by the grammar and
+        the identity path by the identity binding, so this is the fetch path,
+        and it is three keys — closed by exact key set and exact value.
+        """
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        slug = self.pending_slug()
+        shapes_source = shapes_path.read_text()
+
+        def refuse(name, before, after, expected, label):
+            relative = f"kubernetes/websites/{slug}/{name}"
+            path = self.root / relative
+            original = path.read_text()
+            self.assertEqual(original.count(before), 1)
+            path.write_text(original.replace(before, after, 1))
+            shapes = json.loads(shapes_source)
+            normalized, _, _ = composition.normalized_manifest(
+                path.read_bytes(), name == "source.yaml", True
+            )
+            shapes[relative] = hashlib.sha256(normalized).hexdigest()
+            shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+            with self.subTest(fixture=label):
+                with self.assertRaisesRegex(ValueError, expected):
+                    composition.check(self.root)
+            path.write_text(original)
+            shapes_path.write_text(shapes_source)
+
+        digest = "    digest: sha256:"
+        for name, before, after, expected, label in (
+            ("source.yaml", digest, "    tag: latest\n" + digest,
+             "tag is not a spec.ref field of the reviewed OCIRepository",
+             "ref.tag beside the digest"),
+            ("source.yaml", digest, "    semver: '>=0.1.0'\n" + digest,
+             "semver is not a spec.ref field of the reviewed OCIRepository",
+             "ref.semver beside the digest"),
+            ("source.yaml", "    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+             "    mediaType: application/octet-stream",
+             "spec.layerSelector.mediaType is not the reviewed",
+             "a layer selector that selects no chart"),
+            ("source.yaml", "    operation: copy", "    operation: extract",
+             "spec.layerSelector.operation is not the reviewed copy",
+             "layerSelector.operation away from the reviewed copy"),
+            ("release.yaml", "    name: obsync-chart",
+             "    name: obsync-chart\n    namespace: kube-system",
+             "namespace is not a spec.chartRef field of the reviewed HelmRelease",
+             "chartRef.namespace"),
+            ("release.yaml", "    kind: OCIRepository", "    kind: HelmRepository",
+             "spec.chartRef.kind is not the reviewed OCIRepository",
+             "chartRef.kind"),
+        ):
+            refuse(name, before, after, expected, label)
+        composition.check(self.root)
+
     def test_an_application_cannot_be_active_and_pending_at_once(self):
         """The overlap guard, exercised directly.
 
@@ -591,9 +652,12 @@ spec:
         digest_line = "    digest: " + composition.SENTINEL_DIGEST
         self.assertEqual(original.count(digest_line), 1)
         for label, replacement, expected in (
-            ("tag beside the digest", digest_line + "\n    tag: v0.1.0", "reviewed application boundary"),
-            ("second digest", digest_line + "\n" + digest_line, "one version and one digest"),
-            ("semver range", digest_line + "\n    semver: \">=0.1.0\"", "reviewed application boundary"),
+            ("tag beside the digest", digest_line + "\n    tag: v0.1.0",
+             "tag is not a spec.ref field"),
+            ("second digest", digest_line + "\n" + digest_line,
+             "duplicate spec.ref key digest|one version and one digest"),
+            ("semver range", digest_line + "\n    semver: \">=0.1.0\"",
+             "semver is not a spec.ref field"),
         ):
             with self.subTest(mutation=label):
                 path.write_text(original.replace(digest_line, replacement))
@@ -615,7 +679,10 @@ spec:
                 self.assertEqual(original.count(before), 1)
                 path.write_text(original.replace(before, after))
                 with self.assertRaisesRegex(
-                    ValueError, "reviewed application boundary|does not name obsidian/obsync"
+                    ValueError,
+                    "reviewed application boundary"
+                    "|does not name obsidian/obsync"
+                    "|is not a spec.chartRef field of the reviewed",
                 ):
                     composition.check(self.root)
             path.write_text(original)

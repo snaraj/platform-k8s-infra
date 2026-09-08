@@ -52,6 +52,7 @@ FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml
 # derived from it. Envelope closure below reads this map, so it cannot rot.
 NAMESPACES = {"lidersea-com": "lidersea-com", "naranjo-online": "naranjo-online",
               "obsync": "obsidian"}
+HELM_CHART_MEDIA_TYPE = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 # The exact object each file must name: API version, kind, `metadata.name`
 # template, the complete set of top-level keys, and the complete set of `spec`
 # keys. Both sets are equality, not containment, because a HelmRelease can ask
@@ -62,19 +63,30 @@ NAMESPACES = {"lidersea-com": "lidersea-com", "naranjo-online": "naranjo-online"
 # is refused before a single field inside it is read.
 ENVELOPES = {
     "kustomization.yaml": ("kustomize.config.k8s.io/v1beta1", "Kustomization", None,
-                           frozenset({"apiVersion", "kind", "resources"}), None),
+                           frozenset({"apiVersion", "kind", "resources"}), None, {}),
     "default-deny.yaml": ("networking.k8s.io/v1", "NetworkPolicy", "default-deny",
                           frozenset({"apiVersion", "kind", "metadata", "spec"}),
-                          frozenset({"podSelector", "policyTypes"})),
+                          frozenset({"podSelector", "policyTypes"}), {}),
     "source.yaml": ("source.toolkit.fluxcd.io/v1", "OCIRepository", "{slug}-chart",
                     frozenset({"apiVersion", "kind", "metadata", "spec"}),
-                    frozenset({"interval", "layerSelector", "ref", "timeout", "url", "verify"})),
+                    frozenset({"interval", "layerSelector", "ref", "timeout", "url", "verify"}),
+                    {"ref": (frozenset({"digest"}), {}),
+                     "layerSelector": (frozenset({"mediaType", "operation"}),
+                                       {"mediaType": HELM_CHART_MEDIA_TYPE,
+                                        "operation": "copy"})}),
     "release.yaml": ("helm.toolkit.fluxcd.io/v2", "HelmRelease", "{slug}",
                      frozenset({"apiVersion", "kind", "metadata", "spec"}),
                      frozenset({"chartRef", "driftDetection", "install", "interval",
                                 "maxHistory", "releaseName", "serviceAccountName",
-                                "suspend", "upgrade", "values"})),
+                                "suspend", "upgrade", "values"}),
+                     {"chartRef": (frozenset({"kind", "name"}),
+                                   {"kind": "OCIRepository", "name": "{slug}-chart"})}),
 }
+# The three fetch-path fields, closed by exact key set and exact value. The
+# values path is closed by the grammar and the identity path by the identity
+# binding; this is what a substitution committed WITH a re-pinned shape hash
+# could still move — a `tag` or `semver` beside the digest, a layer selector
+# that no longer selects a chart, a chartRef pointed at another namespace.
 RESOURCE_ENTRY = re.compile(r'^  - (?P<name>[a-z0-9-]+\.yaml)$')
 RECEIPT = Path("docs/assurance/195-chart-acquisition-receipt.json")
 VERSION_LINE = re.compile(r'^    platform\.snaraj\.dev/chart-release: "([0-9.]+)"$', re.MULTILINE)
@@ -316,7 +328,7 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
     refused here for naming the wrong thing, not later for holding the wrong
     field, and the values guard below is reachable only through this function.
     """
-    api_version, kind, name_template, top_keys, spec_keys = ENVELOPES[name]
+    api_version, kind, name_template, top_keys, spec_keys, fetch_fields = ENVELOPES[name]
     numbered = closed_document(payload.decode("utf-8"))
     top: dict[str, tuple[int, str]] = {}
     for number, raw in numbered:
@@ -362,6 +374,17 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
     if spec_keys - set(declared):
         missing = ", ".join(sorted(spec_keys - set(declared)))
         raise ValueError(f"{name} is missing spec keys of the reviewed {kind}: {missing}")
+    for key, (fields, constants) in fetch_fields.items():
+        observed = bare_keys(block_body(spec_lines, declared[key][0], 2), 4, f"spec.{key}")
+        for extra in sorted(set(observed) - fields):
+            raise ValueError(f"line {observed[extra][0]}: {extra} is not a spec.{key} field of the reviewed {kind}")
+        if fields - set(observed):
+            missing = ", ".join(sorted(fields - set(observed)))
+            raise ValueError(f"{name} is missing spec.{key} fields of the reviewed {kind}: {missing}")
+        for field, constant in constants.items():
+            wanted = constant.format(slug=slug)
+            if observed[field][1] != wanted:
+                raise ValueError(f"line {observed[field][0]}: spec.{key}.{field} is not the reviewed {wanted}")
     return spec_lines
 
 
