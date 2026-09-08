@@ -26,9 +26,14 @@ spec:
   maxHistory: 2
   releaseName: obsync
   # Application-specific, not the generic `helm-reconciler` the two sites use.
-  # The platform grants this account creation unnamed and every follow-up
-  # mutation pinned by `resourceNames` to the chart's rendered names, so it can
-  # neither update nor delete an object some other workload creates here.
+  #
+  # DEPENDS ON A COMPANION PLATFORM CHANGE. This account is created by
+  # `snaraj/platform`, which owns namespaces, RBAC and reconciliation
+  # definitions; the change that adds its ServiceAccount, Role and RoleBinding —
+  # creation unnamed, every follow-up mutation pinned by `resourceNames` to the
+  # chart's rendered names, and no namespace-wide claim rule — is in flight
+  # there. Until it merges this name resolves to nothing, which is one more
+  # reason this release is suspended and not ready.
   serviceAccountName: obsync-helm-reconciler
   driftDetection:
     mode: enabled

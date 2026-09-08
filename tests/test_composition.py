@@ -252,22 +252,50 @@ class CompositionTests(unittest.TestCase):
         and `strategy: Recreate` in the signed chart; `ReadWriteOncePod` would
         express one-Pod exclusivity but needs a CSI driver the local class does
         not have. This repository's narrow part is that no values block may ASK
-        for a second Pod, and the check is scoped to the values block because
-        `spec.upgrade.remediation.strategy` is a legitimate sibling field.
+        for a second Pod.
+
+        Every mutation is RE-PINNED before `check` runs. Review finding: the
+        first version of this guard was a regex over raw text, and
+        `"replicas": 2` walked past it — the byte hash caught that mutant, which
+        made the guard look alive while it was not. Re-pinning removes the hash
+        from the equation so only the guard is under test.
         """
 
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        hostile = (
+            "    replicas: 2",
+            '    "replicas": 2',
+            "    'replicas': 2",
+            "    replicaCount: 2",
+            "    REPLICAS: 2",
+            "    strategy: RollingUpdate",
+            '    "strategy": RollingUpdate',
+            "    updateStrategy: RollingUpdate",
+            # Nested one level deeper: Helm reads this as a key too.
+            "    deployment:\n      replicas: 2",
+            # A flow mapping is refused outright rather than parsed.
+            "    deployment: {replicas: 2}",
+        )
         for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
-            path = self.root / "kubernetes/websites" / slug / "release.yaml"
-            original = path.read_text()
-            for key in ("replicas: 2", "replicaCount: 2", "strategy: RollingUpdate",
-                        "updateStrategy: RollingUpdate"):
-                with self.subTest(slug=slug, mutation=key):
-                    path.write_text(original.rstrip("\n") + "\n    " + key + "\n")
+            relative = f"kubernetes/websites/{slug}/release.yaml"
+            path = self.root / relative
+            original, original_shapes = path.read_text(), shapes_path.read_text()
+            pending = slug in composition.PENDING_APPLICATIONS
+            for addition in hostile:
+                with self.subTest(slug=slug, mutation=addition.strip()):
+                    path.write_text(original.rstrip("\n") + "\n" + addition + "\n")
+                    shapes = json.loads(original_shapes)
+                    normalized, _, _ = composition.normalized_manifest(
+                        path.read_bytes(), False, pending
+                    )
+                    shapes[relative] = hashlib.sha256(normalized).hexdigest()
+                    shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
                     with self.assertRaisesRegex(
-                        ValueError, "replica count or rollout strategy"
+                        ValueError, "replica count or rollout strategy|flow collections"
                     ):
                         composition.check(self.root)
                 path.write_text(original)
+                shapes_path.write_text(original_shapes)
             # The sibling that must stay admissible: a guard that refused the
             # reviewed tree would be broken rather than stricter.
             self.assertIn("      strategy: rollback", original)

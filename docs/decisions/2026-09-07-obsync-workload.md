@@ -107,19 +107,37 @@ access mode alone prevents a second writer is wrong, and this document does not
 make one. `ReadWriteOncePod`, which WOULD express one-Pod exclusivity, needs a
 CSI driver and is not available on the non-CSI local class this workload uses.
 
-The enforceable boundary is three things, none of them the access mode:
+The intended boundary is three things, none of them the access mode, and the
+first is **not yet established** — it is the control this design depends on,
+under review upstream as this is written:
 
-1. **The server's own exclusive advisory lock on the journal root.** `Store::open`
-   takes an exclusive advisory lock on `v1/lock` of the journal volume before
-   reading a byte (Rust `File::try_lock`, flock semantics); a second `obsyncd`
-   on the same volumes refuses to start, logging
-   `event=store_open decision=refused reason=journal_locked`. This is the only
-   one of the three that holds against a Pod the platform did not schedule, so
-   it is the load-bearing one, and it is independently tested rather than
-   asserted: `snaraj/obsync` commit `9a5e96d` carries the unit test
+1. **The server's own exclusive advisory lock on the journal root — INTENDED,
+   PENDING UPSTREAM REVIEW.** `Store::open` takes an exclusive advisory lock on
+   `v1/lock` of the journal volume before reading a byte (Rust
+   `File::try_lock`, flock semantics); a second `obsyncd` on the same volumes
+   refuses to start, logging
+   `event=store_open decision=refused reason=journal_locked`, covered by
    `storage::tests::a_second_process_on_the_same_journal_refuses_to_start` and
    image-smoke property 7, which starts a second container on the same volumes
    beside a serving one and requires the refusal.
+
+   The first head to carry it, `snaraj/obsync` `9a5e96d`, did NOT close the
+   boundary: the chart still set `fsGroup` and the posture accepted a
+   group-writable parent, so a second Pod running with the same uid or gid
+   could rename `v1` and take a lock on a different `v1/lock` — the lock held,
+   and it held on the wrong file. The candidate head that repairs it is
+   `a93e97e` (group write refused regardless of gid, canonical-path refusal, no
+   `fsGroup`), and it is under review now. **This document cites `a93e97e` as a
+   CANDIDATE, not as an established control, and no activation may rely on it
+   until that review returns an APPROVE at an exact head.** The reviewed head
+   replaces this paragraph in the change that records it.
+
+   Because the mechanism is a filesystem lock rather than a group permission,
+   the host directories carry the condition instead:
+   `/mnt/local-pie-ssd/obsidian/obsync-blobs` and
+   `/mnt/local-pie-ssd/obsidian/obsync-journal` created `65532:65532`, mode
+   `0700`, with root-owned parents that are not group- or world-writable
+   (sticky is acceptable) and no symlink anywhere on the path.
 2. **`replicas: 1` in the chart**, which is not overridable from here: the
    chart's values schema is closed and exposes no replica count, so no platform
    value can ask for two.

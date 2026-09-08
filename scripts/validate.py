@@ -85,9 +85,11 @@ STORAGE_KIND_LINE = re.compile(
 # pattern that matched it would refuse the reviewed tree — a guard that cannot
 # be satisfied is not stricter, it is broken.
 VALUES_BLOCK = re.compile(r'(?ms)^  values:$(.*)\Z')
-REPLICA_OR_STRATEGY_LINE = re.compile(
-    r'^\s*(?:replicas|replicaCount|strategy|updateStrategy):', re.MULTILINE
-)
+# The keys that would ask a single-writer workload for a second Pod, compared
+# after normalisation rather than matched as raw text. Review finding: a regex
+# over the raw block was bypassed by `"replicas": 2`, because YAML and Helm read
+# a quoted key and a bare one as the same key while a text pattern does not.
+SECOND_POD_KEYS = frozenset({"replicas", "replicacount", "strategy", "updatestrategy"})
 CLAIM_VOLUME_LINE = re.compile(
     r'^\s*(?:-\s+)?(?:persistentVolumeClaim|ephemeral|csi):\s*$', re.MULTILINE
 )
@@ -190,10 +192,45 @@ def identity_errors(payload: bytes, slug: str, repository: str) -> None:
         raise ValueError("publisher identity is not the declared application repository")
 
 
+def values_keys(block: str) -> set[str]:
+    """Every mapping key in a values block, normalised, at any depth.
+
+    A deliberately small reader rather than a YAML parser, and fail-closed in
+    the two directions that matter. Flow collections are REFUSED outright
+    instead of parsed, because `{replicas: 2}` on one line is the shape a
+    line-oriented reader is worst at and a values block has no need of it.
+    Quoting is stripped before comparison, because YAML and Helm read
+    `"replicas"`, `'replicas'` and `replicas` as one key while a text pattern
+    reads three.
+    """
+    keys = set()
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith(("{", "[")) or "{" in stripped or "&" in stripped or "*" in stripped:
+            raise ValueError("values block must not use flow collections, anchors or aliases")
+        if stripped.startswith("- "):
+            stripped = stripped[2:].strip()
+        if ":" not in stripped:
+            continue
+        key = stripped.split(":", 1)[0].strip()
+        if len(key) > 1 and key[0] == key[-1] and key[0] in "\"'":
+            key = key[1:-1]
+        keys.add(key.strip().lower())
+    return keys
+
+
 def single_writer_errors(payload: bytes) -> None:
-    """No composition value may ask a single-writer workload for a second Pod."""
+    """No composition value may ask a single-writer workload for a second Pod.
+
+    `ReadWriteOnce` is node exclusion, not Pod exclusion, so the boundary is the
+    server's own exclusive journal lock plus `replicas: 1` and `strategy:
+    Recreate` in the signed chart. This repository's narrow part is that no
+    values block may ASK for either, at any nesting depth and under any quoting.
+    """
     block = VALUES_BLOCK.search(payload.decode("utf-8"))
-    if block and REPLICA_OR_STRATEGY_LINE.search(block.group(1)):
+    if block and values_keys(block.group(1)) & SECOND_POD_KEYS:
         raise ValueError("composition must not set a replica count or rollout strategy")
 
 
