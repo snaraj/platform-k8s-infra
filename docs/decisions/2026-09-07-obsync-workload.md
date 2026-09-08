@@ -98,6 +98,39 @@ Unlike the two websites, this workload is stateful. Its chart creates two
 PersistentVolumeClaims at render time — a blob store and a journal — bound to
 volumes an operator provisions out of band on local SSD.
 
+### What actually makes it single-writer, since `ReadWriteOnce` does not
+
+`ReadWriteOnce` excludes other NODES, not other Pods. On a single-node cluster
+that exclusion is vacuous: two Pods scheduled to the same node may both mount
+the same claim read-write and both write the journal. Any statement that the
+access mode alone prevents a second writer is wrong, and this document does not
+make one. `ReadWriteOncePod`, which WOULD express one-Pod exclusivity, needs a
+CSI driver and is not available on the non-CSI local class this workload uses.
+
+The enforceable boundary is three things, none of them the access mode:
+
+1. **The server's own exclusive advisory lock on the journal root.** `Store::open`
+   takes an exclusive advisory lock on `v1/lock` of the journal volume before
+   reading a byte (Rust `File::try_lock`, flock semantics); a second `obsyncd`
+   on the same volumes refuses to start, logging
+   `event=store_open decision=refused reason=journal_locked`. This is the only
+   one of the three that holds against a Pod the platform did not schedule, so
+   it is the load-bearing one, and it is independently tested rather than
+   asserted: `snaraj/obsync` commit `9a5e96d` carries the unit test
+   `storage::tests::a_second_process_on_the_same_journal_refuses_to_start` and
+   image-smoke property 7, which starts a second container on the same volumes
+   beside a serving one and requires the refusal.
+2. **`replicas: 1` in the chart**, which is not overridable from here: the
+   chart's values schema is closed and exposes no replica count, so no platform
+   value can ask for two.
+3. **`strategy: Recreate`**, so a rollout terminates the old Pod before
+   creating the new one rather than briefly running both.
+
+Items 2 and 3 are properties of the signed chart, so the platform asserts them
+over the RENDERED Deployment rather than trusting this description — see the
+`obsidian` workload rule in the platform's Conftest suite. Activation cannot
+proceed on a chart that could run two Pods.
+
 **This repository activates no storage, and this commit does not weaken the rule
 that says so.** The contract's own line is: "Reject public Kubernetes entry
 points, host networking, storage activation, unknown resources, cross-namespace

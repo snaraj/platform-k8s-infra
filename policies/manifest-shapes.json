@@ -9,6 +9,6 @@
   "kubernetes/websites/naranjo-online/source.yaml": "71983719e9714a100d6d5f5b782877a266d9997990a73dae76c4693e7af9ee73",
   "kubernetes/websites/obsync/default-deny.yaml": "bd8f2e30d75afceba5a23e3f267008f3304ddc379467d7e0dcf2218e85fcced3",
   "kubernetes/websites/obsync/kustomization.yaml": "0842bdd52c4b1c760c80fa8e274fec277bfecb7e2e2e4d410b01b158575f7d54",
-  "kubernetes/websites/obsync/release.yaml": "c2389da6bec4c584d32e886e9d83f11eda2749657dc9a1f453cbb1ea12653e63",
+  "kubernetes/websites/obsync/release.yaml": "055db9f2ddb6db50b460b219c1eccf7b94501c0c18945928a2959ccdfe4f9736",
   "kubernetes/websites/obsync/source.yaml": "07bcf704a0870fe53dbba3b9c0cf5ffacad2a616d7241057b0bf337de348cbc8"
 }

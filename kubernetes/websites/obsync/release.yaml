@@ -25,7 +25,11 @@ spec:
   # `strategy: rollback` remediation below.
   maxHistory: 2
   releaseName: obsync
-  serviceAccountName: helm-reconciler
+  # Application-specific, not the generic `helm-reconciler` the two sites use.
+  # The platform grants this account creation unnamed and every follow-up
+  # mutation pinned by `resourceNames` to the chart's rendered names, so it can
+  # neither update nor delete an object some other workload creates here.
+  serviceAccountName: obsync-helm-reconciler
   driftDetection:
     mode: enabled
   # The chart artifact comes from the signature-verified OCIRepository beside

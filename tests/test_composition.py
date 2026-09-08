@@ -1,4 +1,5 @@
 """Prove that the extracted composition admits selections, not new authority."""
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -165,6 +166,132 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn(self.pending_slug(), selections)
         self.assertNotIn(self.pending_slug(), receipt["records"])
 
+    def test_the_declared_application_repository_is_load_bearing(self):
+        """The map VALUE must change an outcome, or it is documentation.
+
+        Review finding: `PENDING_APPLICATIONS = {"obsync": "obsync"}` was
+        documented as slug -> application repository while nothing read the
+        value, so `{"obsync": "foreign-publisher"}` left the suite green. The
+        active map's value is bound by the receipt's signer comparison; a
+        pending application has no receipt record, so the same derivation is
+        checked against the manifest's own publisher subject instead.
+
+        Both maps are exercised here, because a rule that only fired on pending
+        input would let the active binding rot unnoticed.
+        """
+
+        for attribute in ("APPLICATIONS", "PENDING_APPLICATIONS"):
+            declared = getattr(composition, attribute)
+            for slug, repository in sorted(declared.items()):
+                with self.subTest(map=attribute, slug=slug):
+                    original = dict(declared)
+                    try:
+                        declared[slug] = "foreign-publisher"
+                        with self.assertRaisesRegex(
+                            ValueError, "declared application repository"
+                        ):
+                            composition.check(self.root)
+                    finally:
+                        declared.clear()
+                        declared.update(original)
+        composition.check(self.root)
+
+    def test_a_substituted_identity_survives_a_re_pin_and_is_still_refused(self):
+        """The bypass the byte pins cannot see, which is why this check exists.
+
+        Editing a manifest alone already fails its shape pin. The realistic
+        attempt is a substituted chart repository or publisher subject
+        committed TOGETHER with a re-pinned hash: self-consistent bytes, and a
+        lie about which repository publishes this application. Each mutation
+        below is therefore re-pinned before `check` runs, so the pin passes and
+        the identity binding is the only thing left standing.
+        """
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
+            relative = f"kubernetes/websites/{slug}/source.yaml"
+            path = self.root / relative
+            original, original_shapes = path.read_text(), shapes_path.read_text()
+            pending = slug in composition.PENDING_APPLICATIONS
+            url = composition.URL_LINE.findall(original)[0]
+            subject = composition.SUBJECT_LINE.findall(original)[0]
+            for label, before, after, expected in (
+                ("foreign chart repository", url,
+                 "oci://ghcr.io/snaraj/charts/foreign", "chart repository is not the declared"),
+                ("foreign publisher", subject,
+                 subject.replace("release-publisher", "foreign-publisher"),
+                 "publisher identity is not the declared"),
+                # An unescaped dot matches ANY character, so `naranjoXonline`
+                # would verify against a subject that reads identical.
+                ("unescaped dot", subject, subject.replace("\\.", "."),
+                 "publisher identity is not the declared"),
+                ("unanchored subject", subject, subject.rstrip("$"),
+                 "publisher identity is not the declared"),
+            ):
+                if before == after:
+                    continue
+                with self.subTest(slug=slug, mutation=label):
+                    path.write_text(original.replace(before, after))
+                    shapes = json.loads(original_shapes)
+                    normalized, _, _ = composition.normalized_manifest(
+                        path.read_bytes(), True, pending
+                    )
+                    shapes[relative] = hashlib.sha256(normalized).hexdigest()
+                    shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+                    with self.assertRaisesRegex(ValueError, expected):
+                        composition.check(self.root)
+                path.write_text(original)
+                shapes_path.write_text(original_shapes)
+        composition.check(self.root)
+
+    def test_composition_cannot_ask_for_a_second_pod(self):
+        """`ReadWriteOnce` is node exclusion, so this is not the boundary.
+
+        On a single-node cluster two Pods can mount the same claim read-write.
+        The boundary is the server's exclusive journal lock plus `replicas: 1`
+        and `strategy: Recreate` in the signed chart; `ReadWriteOncePod` would
+        express one-Pod exclusivity but needs a CSI driver the local class does
+        not have. This repository's narrow part is that no values block may ASK
+        for a second Pod, and the check is scoped to the values block because
+        `spec.upgrade.remediation.strategy` is a legitimate sibling field.
+        """
+
+        for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
+            path = self.root / "kubernetes/websites" / slug / "release.yaml"
+            original = path.read_text()
+            for key in ("replicas: 2", "replicaCount: 2", "strategy: RollingUpdate",
+                        "updateStrategy: RollingUpdate"):
+                with self.subTest(slug=slug, mutation=key):
+                    path.write_text(original.rstrip("\n") + "\n    " + key + "\n")
+                    with self.assertRaisesRegex(
+                        ValueError, "replica count or rollout strategy"
+                    ):
+                        composition.check(self.root)
+                path.write_text(original)
+            # The sibling that must stay admissible: a guard that refused the
+            # reviewed tree would be broken rather than stricter.
+            self.assertIn("      strategy: rollback", original)
+        composition.check(self.root)
+
+    def test_an_application_cannot_be_active_and_pending_at_once(self):
+        """The overlap guard, exercised directly.
+
+        Review finding: deleting this guard left the suite green, because
+        nothing constructed the overlap it refuses. An application in both maps
+        would be checked under the pending rules and ALSO acquire a receipt
+        record, which is exactly the reserved place the pending state exists to
+        prevent.
+        """
+
+        slug = self.pending_slug()
+        composition.APPLICATIONS[slug] = "obsync"
+        try:
+            with self.assertRaisesRegex(ValueError, "active and pending at once"):
+                composition.check(self.root)
+        finally:
+            del composition.APPLICATIONS[slug]
+        composition.check(self.root)
+
     def test_a_pending_selection_may_be_the_sentinel_and_nothing_else(self):
         slug = self.pending_slug()
         path = self.root / "kubernetes/websites" / slug / "source.yaml"
@@ -239,7 +366,8 @@ class CompositionTests(unittest.TestCase):
         for before, after in (
             ("    name: obsync-chart", "    name: obsync-chart\n    namespace: naranjo-online"),
             ("  namespace: obsidian", "  namespace: naranjo-online"),
-            ("  serviceAccountName: helm-reconciler", "  serviceAccountName: default"),
+            ("  serviceAccountName: obsync-helm-reconciler", "  serviceAccountName: default"),
+            ("  serviceAccountName: obsync-helm-reconciler", "  serviceAccountName: helm-reconciler"),
         ):
             with self.subTest(mutation=after):
                 self.assertEqual(original.count(before), 1)

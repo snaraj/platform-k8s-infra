@@ -50,6 +50,15 @@ RECEIPT = Path("docs/assurance/195-chart-acquisition-receipt.json")
 VERSION_LINE = re.compile(r'^    platform\.snaraj\.dev/chart-release: "([0-9.]+)"$', re.MULTILINE)
 DIGEST_LINE = re.compile(r'^    digest: (sha256:[0-9a-f]{64})$', re.MULTILINE)
 SENTINEL_DIGEST = "sha256:" + "0" * 64
+# The two identity fields a source manifest states in its own bytes. They are
+# what makes the map VALUE load-bearing for an application that has no receipt
+# yet: an active application's repository is bound by comparing the receipt's
+# signer subject to the one derived from the map, but a pending application has
+# no receipt record to compare against, so the same derivation is checked
+# against the manifest instead. Applied to every application, not only pending
+# ones, so one rule covers both maps and neither can drift.
+URL_LINE = re.compile(r'^  url: (\S+)$', re.MULTILINE)
+SUBJECT_LINE = re.compile(r'^        subject: (\S+)$', re.MULTILINE)
 SUSPEND_LINE = re.compile(r'^  suspend: (\S+)$', re.MULTILINE)
 READY_LINE = re.compile(r'^    deploymentReady: (\S+)$', re.MULTILINE)
 # Storage activation is an operator decision, never an application one: a
@@ -65,6 +74,20 @@ STORAGE_KIND_LINE = re.compile(
 # The dash is deliberate: a volume entry is a YAML sequence item, so the source
 # key is written `- persistentVolumeClaim:` and a pattern anchored on
 # whitespace alone matches nothing and guards nothing.
+# `ReadWriteOnce` excludes other NODES, not other Pods, so on a single-node
+# cluster it prevents no second writer at all. The single-writer boundary is the
+# server's own exclusive journal lock plus `replicas: 1` and `strategy:
+# Recreate` in the signed chart. This repository's part is narrow and exact: a
+# platform values block may not ASK for either, so no composition change can
+# weaken the boundary even if a future chart made them overridable.
+# Scoped to the VALUES block on purpose. `spec.upgrade.remediation.strategy` is
+# a helm-controller field the two active releases legitimately carry, and a
+# pattern that matched it would refuse the reviewed tree — a guard that cannot
+# be satisfied is not stricter, it is broken.
+VALUES_BLOCK = re.compile(r'(?ms)^  values:$(.*)\Z')
+REPLICA_OR_STRATEGY_LINE = re.compile(
+    r'^\s*(?:replicas|replicaCount|strategy|updateStrategy):', re.MULTILINE
+)
 CLAIM_VOLUME_LINE = re.compile(
     r'^\s*(?:-\s+)?(?:persistentVolumeClaim|ephemeral|csi):\s*$', re.MULTILINE
 )
@@ -128,6 +151,52 @@ def normalized_manifest(payload: bytes, source: bool, pending: bool = False) -> 
     return normalized.encode(), version, digest
 
 
+def publisher_subject(repository: str) -> str:
+    """The anchored cosign subject for one application repository's publisher.
+
+    Dots are escaped because the subject is a REGULAR EXPRESSION in the
+    manifest, and an unescaped dot in `naranjo.online` would match any
+    character — `naranjoXonline` would verify. The anchors are what stop a
+    look-alike host or a longer path from matching at all.
+    """
+    escaped = repository.replace(".", r"\.")
+    return (
+        r"^https://github\.com/" + escaped
+        + r"/\.github/workflows/release-publisher\.yml@refs/heads/main$"
+    )
+
+
+def identity_errors(payload: bytes, slug: str, repository: str) -> None:
+    """Bind the declared application repository to the manifest's own bytes.
+
+    Without this the map value is decoration: replacing it with
+    `foreign-publisher` changed nothing any check read, because the receipt
+    comparison that consumes it is skipped for a pending application and the
+    byte pins are computed FROM the file rather than from the declaration.
+
+    It runs AFTER the byte pins deliberately, so it reports only what those
+    pins cannot see. A manifest edited alone already fails the pin. The case
+    this catches is the one that gets past it: a substituted chart repository
+    or publisher subject committed TOGETHER with a re-pinned hash, which is
+    self-consistent bytes and a lie about which repository publishes this
+    application. The expected URL is derived from the SLUG and the expected
+    publisher from the map VALUE, so both halves of a declaration are load
+    bearing and neither can be a comment.
+    """
+    text = payload.decode("utf-8")
+    if URL_LINE.findall(text) != ["oci://ghcr.io/snaraj/charts/" + slug]:
+        raise ValueError("chart repository is not the declared application identity")
+    if SUBJECT_LINE.findall(text) != [publisher_subject("snaraj/" + repository)]:
+        raise ValueError("publisher identity is not the declared application repository")
+
+
+def single_writer_errors(payload: bytes) -> None:
+    """No composition value may ask a single-writer workload for a second Pod."""
+    block = VALUES_BLOCK.search(payload.decode("utf-8"))
+    if block and REPLICA_OR_STRATEGY_LINE.search(block.group(1)):
+        raise ValueError("composition must not set a replica count or rollout strategy")
+
+
 def pending_release_errors(payload: bytes) -> None:
     """A pending application deploys nothing, stated as its own refusal.
 
@@ -170,6 +239,8 @@ def check(root: Path = ROOT) -> tuple[dict, dict]:
         pending = slug in PENDING_APPLICATIONS
         payload = read_file(root, path)
         storage_activation_errors(payload)
+        if path.name == "release.yaml":
+            single_writer_errors(payload)
         if pending and path.name == "release.yaml":
             pending_release_errors(payload)
         normalized, version, digest = normalized_manifest(
@@ -177,6 +248,8 @@ def check(root: Path = ROOT) -> tuple[dict, dict]:
         )
         if hashlib.sha256(normalized).hexdigest() != shapes[relative]:
             raise ValueError("manifest changes the reviewed application boundary")
+        if path.name == "source.yaml":
+            identity_errors(payload, slug, inventory[slug])
         if version and not pending:
             repository = f"snaraj/{APPLICATIONS[slug]}"
             selections[slug] = artifacts.Selection(
