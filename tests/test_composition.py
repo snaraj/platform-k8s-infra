@@ -28,9 +28,17 @@ class CompositionTests(unittest.TestCase):
     def write_receipt(self, value):
         (self.root / composition.RECEIPT).write_text(composition.artifacts.render_receipt_json(value))
 
-    def test_initial_boundary_is_exactly_the_two_existing_applications(self):
+    def test_the_boundary_is_exactly_the_declared_active_applications(self):
+        """Derived from the declaration, so promoting a slug cannot skip it.
+
+        The predecessor named the two applications inline, which made a
+        promotion look like a test edit. The set under test is the map, and the
+        map is what the receipt closure is required to bind exactly.
+        """
+
         selections, _ = composition.check(self.root)
-        self.assertEqual(set(selections), {"naranjo-online", "lidersea-com"})
+        self.assertEqual(set(selections), set(composition.APPLICATIONS))
+        self.assertIn("obsync", selections)
         for slug, value in selections.items():
             self.assertEqual(value.chart_repository, f"ghcr.io/snaraj/charts/{slug}")
             self.assertTrue(value.subject.endswith("/release-publisher.yml@refs/heads/main"))
@@ -157,8 +165,19 @@ class CompositionTests(unittest.TestCase):
     # rule rot unnoticed and vice versa.
 
     def pending_slug(self):
+        """The pending application under test, or skip if none is declared.
+
+        Promotion empties `PENDING_APPLICATIONS`, and the honest response is a
+        SKIP rather than a deletion or a vacuous pass: the rules are still
+        enforced in `scripts/validate.py` and the next application whose
+        publisher has not cut a release will need every one of these tests. A
+        skip says "no subject today"; a quietly green test would say "proven".
+        """
+
         slugs = sorted(composition.PENDING_APPLICATIONS)
-        self.assertEqual(len(slugs), 1, "one pending application is declared")
+        if not slugs:
+            self.skipTest("no application is pending; the rules stand unexercised")
+        self.assertEqual(len(slugs), 1, "at most one pending application is declared")
         return slugs[0]
 
     def test_the_two_maps_are_disjoint_and_the_boundary_covers_both(self):

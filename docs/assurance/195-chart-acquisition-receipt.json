@@ -1,6 +1,6 @@
 {
   "chartLayerMediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-  "capturedDate": "2026-09-07",
+  "capturedDate": "2026-09-08",
   "records": {
     "lidersea-com": {
       "arm64Digest": "sha256:c10d8bda7dfb1630f10e3baf2927c23fb3ab3f9fd95996fc496cf9bd3d65c38b",
@@ -27,6 +27,19 @@
       "release": {"assetDigest": "sha256:61825308c6290fb46f38b58c92c451b1c826b0474ca98ce911f7785ac3a0c135", "sourceSha": "6ce0887c38b5f70ceff7d75f3cc1a91dd6947093"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/naranjo.online/.github/workflows/release-publisher.yml@refs/heads/main"},
       "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.80@sha256:63236d492c84e7d0e48f3e8b8c1b7551053defbd6461e27a3b3e6e5c1559f05f"
+    },
+    "obsync": {
+      "arm64Digest": "sha256:ad63409dff8ab46188b680a8f17467b075ad3e0f9fc59f69d5161eb4eed02611",
+      "chart": {"appVersion": "0.1.3", "name": "obsync", "version": "0.1.3"},
+      "chartConfigDigest": "sha256:5761a28e92015bbf555085b9ccfe0e15ee72b7984d073b97047fa43c664eb631",
+      "chartLayerDigest": "sha256:89029508eb1c39f281ef24966360737bda7d12e5c61983b316a070d460618074",
+      "chartRepository": "ghcr.io/snaraj/charts/obsync",
+      "chartTag": "0.1.3",
+      "manifestDigest": "sha256:9144c1aba139211d0ea8b04b7d7f87531901cec9c32135e9822c815d36da3182",
+      "matchingChartLayerCount": 1,
+      "release": {"assetDigest": "sha256:c90bb69f78ba45a21378004d52902e2b5626c024d51465456f6665e5235a9823", "sourceSha": "88a21bde0f8ad597fee9af643c8a1dfea772cbf1"},
+      "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/obsync/.github/workflows/release-publisher.yml@refs/heads/main"},
+      "workloadImage": "ghcr.io/snaraj/obsync:v0.1.3@sha256:cfd81b66b79a692fda33f0ed9dd2a7fd10117ee979ef4334794cedb53c05f8f6"
     }
   },
   "schema": "dev.snaraj.chart-acquisition-receipt/v2",

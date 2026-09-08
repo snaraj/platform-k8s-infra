@@ -1,7 +1,11 @@
 # Threat-model decision: admitting obsync as a third application
 
-Date 2026-09-07. Status: reviewed decision required before activation; the
-composition this document accompanies is committed **pending and inert**.
+Date 2026-09-07. Status: the decision this document records has been reviewed,
+and the composition it accompanies is **activated in this repository** as of
+2026-09-08 — a verified chart is selected, the release is unsuspended, and the
+slug is active. Activation of the *repository* is not readiness of the
+*cluster*: `deploymentReady` stays `false` (§4), so the release renders no
+workload, and nothing here asserts a running one.
 
 The contribution contract requires a new reviewed threat-model decision for
 "adding a workload or expanding a trust boundary". This is that decision for
@@ -14,14 +18,17 @@ Admitted: a third application directory, `kubernetes/websites/obsync/`, holding
 the same four manifests the two existing applications hold — one default-deny
 NetworkPolicy, one OCIRepository, one HelmRelease, one kustomization.
 
-Not admitted, and each is a separate later decision:
+Onboarding admitted the directory and nothing else: the entry was in
+`PENDING_APPLICATIONS`, the selection was the all-zero sentinel, and the release
+was `suspend: true`. Activation is the one reviewed change that moves the slug
+to `APPLICATIONS`, replaces the sentinel with the acquired chart digest,
+unsuspends the release and adds the acquisition receipt record. The validator's
+two rule sets are opposites, so that change could not half-land.
 
-- no active application (the entry is `PENDING_APPLICATIONS`, not
-  `APPLICATIONS`, so it contributes no selection and no receipt record);
-- no resolved chart digest (the selection is the all-zero sentinel, and a real
-  digest is REFUSED while pending);
-- no running workload (`suspend: true`, `deploymentReady: false`, both required
-  by the validator rather than merely written);
+Still not admitted, and each is a separate later decision:
+
+- no running workload: `deploymentReady: false` — the value that describes the
+  CLUSTER — is unchanged, so the chart renders no Deployment and no claim;
 - no storage activation (§4);
 - no public entry point of any kind (§3).
 
@@ -84,13 +91,33 @@ edge in any contributing policy**. A connector-matching rule on the application
 would hand the connector that cleartext listener, which is the specific
 misconfiguration this design exists to prevent.
 
-That proxy's exact identity arrives with the security lane's own reviewed
-deployment change. Until then the application's `ingress.peer*` values name a
-declared placeholder (`obsync-tls-proxy` / `obsync-tls-proxy-pending` in
-`obsidian`) that no Pod carries, so the rendered ingress policy admits nothing
-and the workload stays non-deployable. **That is the intended interim state.**
-An absent matching proxy is a route that does not work; naming the connector
-"temporarily" would have been a route that works and should not.
+That proxy's exact identity has now arrived: `snaraj/platform` reviewed and
+merged its Deployment, whose Pod template carries `app.kubernetes.io/name:
+obsync-tls-proxy` and `app.kubernetes.io/instance: obsync-tls-proxy` in
+`obsidian`. Activation retires the `obsync-tls-proxy-pending` placeholder and
+binds `ingress.peer*` to that real pair. The placeholder was the right value
+while no such Pod could exist — an absent matching proxy is a route that does
+not work, and naming the connector "temporarily" would have been a route that
+works and should not — but it stops being a fail-closed statement and becomes
+a stale one once the real identity is reviewed and knowable.
+
+**The order matters, and it is what resolves the cycle the proxy's reviewer
+raised.** The two workloads appear to depend on each other: the proxy's
+readiness probe forwards `/readyz` to the application, so the proxy cannot
+become Ready until the application answers; the application's ingress policy
+admits only Pods carrying both labels above, so the application answers nobody
+until the proxy exists. That is a deadlock only if the binding is applied after
+the proxy. It is applied BEFORE — in this change, while no proxy Pod exists at
+all. The policy is then already in place and already admits exactly the label
+pair; the operator applies the proxy into a namespace whose application-side
+rule is settled, its Pod matches on creation, its probe reaches the application
+over the one admitted edge, and readiness succeeds on the first attempt. No
+temporary widening is needed anywhere in that sequence, which is the point:
+the cycle is broken by ordering, not by an interim rule that admits more.
+
+Until the operator applies the proxy, the binding admits a Pod set that is
+empty. That is the same fail-closed posture as the placeholder, reached by
+naming something real rather than something impossible.
 
 ## 4. Storage: claim-backed volumes, and the admission decision this needs
 
@@ -153,13 +180,16 @@ divide the way the word "lock" suggests. Stated as it is:
    The first head to carry the lock, `snaraj/obsync` `9a5e96d`, left the
    CROSS-ACCOUNT path open as well: the chart still set `fsGroup` and the
    posture accepted a group-writable parent, so a process merely sharing a gid
-   could perform the same rename. The candidate head `ef01d5d` (group write
-   refused regardless of gid, canonical-path refusal, no `fsGroup`) repairs that
-   cross-account path **only** — the same-uid rename above is out of its reach
-   by construction. **This document cites `ef01d5d` as a CANDIDATE, not as an
-   established control: it is under review as this is written, and no activation
-   may rely on it until that review returns an APPROVE at an exact head.** The
-   reviewed head replaces this paragraph in the change that records it.
+   could perform the same rename. The repair — group write refused regardless of
+   gid, canonical-path refusal, no `fsGroup` — was reviewed on that repository
+   and is present in the source this activation selects, `88a21bde` (the
+   `source_sha` the v0.1.3 release manifest states): its chart template sets no
+   `fsGroup` and its storage posture refuses a group-writable volume rather than
+   sharing a gid with it. The cite is the RELEASED source rather than the review
+   branch head deliberately — a reviewed branch head that is not an ancestor of
+   what shipped proves nothing about the artifact this repository selects. The
+   repair covers the cross-account path **only**; the same-uid rename above is
+   out of its reach by construction and stays the platform's admission decision.
 2. **`replicas: 1` in the chart**, which is not overridable from here: the
    chart's values schema is closed and exposes no replica count, so no platform
    value can ask for two.
