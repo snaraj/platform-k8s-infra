@@ -67,7 +67,12 @@ class CompositionTests(unittest.TestCase):
                 self.assertEqual(original.count(before), 1)
                 try:
                     path.write_text(original.replace(before, after))
-                    with self.assertRaisesRegex(ValueError, "reviewed application boundary"):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "reviewed application boundary"
+                        "|is not a spec key of the reviewed"
+                        "|does not compose exactly the other files",
+                    ):
                         composition.check(self.root)
                 finally:
                     path.write_text(original)
@@ -395,7 +400,7 @@ spec:
              "duplicate top-level key spec"),
             ("a second values key", original.replace(
                 "  values:", "  values:\n    publicUrl: \"\"\n  values:", 1),
-             "exactly one values key"),
+             "duplicate spec key values|exactly one values key"),
             ("an unexpected top-level key", original.rstrip("\n") + "\nstatus:\n  observed: true\n",
              "exact top-level keys of a HelmRelease"),
             ("the wrong kind", original.replace("kind: HelmRelease", "kind: HelmChart", 1),
@@ -418,6 +423,96 @@ spec:
                     composition.check(self.root)
             path.write_text(original)
             shapes_path.write_text(original_shapes)
+        composition.check(self.root)
+
+    def test_a_spec_key_the_reviewed_manifest_does_not_carry_is_refused(self):
+        """The envelope was closed while the `spec` key set was still open.
+
+        A HelmRelease can ask for a second Pod with no values key at all:
+        `postRenderers` patches the rendered Deployment after Helm is done,
+        `valuesFrom` reads a ConfigMap this closed file set does not hold, and
+        `targetNamespace` moves the release out of the namespace the rest of
+        this composition is written for. The same shape holds for the other
+        kinds — an `ingress` rule beside `podSelector` opens what default-deny
+        closes, a Kustomization `patches` list edits every rendered object, and
+        an OCIRepository `secretRef` changes who fetches the chart.
+
+        So `spec` carries exactly the keys the reviewed manifest carries, by
+        equality. Each fixture is RE-PINNED before `check` runs.
+        """
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        slug = self.pending_slug()
+        shapes_source = shapes_path.read_text()
+
+        def refuse(name, mutate, expected, label):
+            relative = f"kubernetes/websites/{slug}/{name}"
+            path = self.root / relative
+            original = path.read_text()
+            path.write_text(mutate(original))
+            shapes = json.loads(shapes_source)
+            normalized, _, _ = composition.normalized_manifest(
+                path.read_bytes(), name == "source.yaml", True
+            )
+            shapes[relative] = hashlib.sha256(normalized).hexdigest()
+            shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+            with self.subTest(fixture=label):
+                with self.assertRaisesRegex(ValueError, expected):
+                    composition.check(self.root)
+            path.write_text(original)
+            shapes_path.write_text(shapes_source)
+
+        post_renderers = (
+            "  postRenderers:\n"
+            "    - kustomize:\n"
+            "        patches:\n"
+            "          - target:\n"
+            "              kind: Deployment\n"
+            "            patch: |\n"
+            "              - op: replace\n"
+            "                path: /spec/replicas\n"
+            "                value: 2\n"
+        )
+        release = (self.root / f"kubernetes/websites/{slug}/release.yaml").read_text()
+        # Nothing in this file asks for a second Pod through values, so spec
+        # closure is the only thing between the patch and the rendered object.
+        self.assertNotIn("replicas", release)
+
+        for name, mutate, expected, label in (
+            ("release.yaml", lambda text: text.rstrip("\n") + "\n" + post_renderers,
+             "postRenderers is not a spec key of the reviewed HelmRelease",
+             "postRenderers patching replicas"),
+            ("release.yaml", lambda text: text.rstrip("\n")
+             + "\n  valuesFrom:\n    - kind: ConfigMap\n      name: obsync-overrides\n",
+             "valuesFrom is not a spec key of the reviewed HelmRelease",
+             "valuesFrom naming a ConfigMap"),
+            ("release.yaml", lambda text: text.rstrip("\n") + "\n  targetNamespace: kube-system\n",
+             "targetNamespace is not a spec key of the reviewed HelmRelease",
+             "targetNamespace"),
+            ("release.yaml", lambda text: text.replace("  suspend: true\n", "", 1),
+             "missing spec keys of the reviewed HelmRelease: suspend",
+             "a removed spec key"),
+            ("default-deny.yaml", lambda text: text.rstrip("\n")
+             + "\n  ingress:\n    - {}\n",
+             "ingress is not a spec key of the reviewed NetworkPolicy",
+             "an allow-all ingress rule"),
+            ("source.yaml", lambda text: text.rstrip("\n")
+             + "\n  secretRef:\n    name: registry-credential\n",
+             "secretRef is not a spec key of the reviewed OCIRepository",
+             "a registry credential"),
+            ("kustomization.yaml", lambda text: text.rstrip("\n")
+             + "\npatches:\n  - path: replicas.yaml\n",
+             "does not carry the exact top-level keys of a Kustomization",
+             "a Kustomization patches list"),
+            ("kustomization.yaml", lambda text: text.rstrip("\n") + "\n  - extra.yaml\n",
+             "does not compose exactly the other files of this application",
+             "a fifth resource"),
+            ("kustomization.yaml",
+             lambda text: text.replace("  - source.yaml", "  - ../naranjo-online/source.yaml", 1),
+             "resources entry is not a composed manifest of this application",
+             "a resource outside this application"),
+        ):
+            refuse(name, mutate, expected, label)
         composition.check(self.root)
 
     def test_an_application_cannot_be_active_and_pending_at_once(self):

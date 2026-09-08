@@ -53,18 +53,29 @@ FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml
 NAMESPACES = {"lidersea-com": "lidersea-com", "naranjo-online": "naranjo-online",
               "obsync": "obsidian"}
 # The exact object each file must name: API version, kind, `metadata.name`
-# template, and the complete set of top-level keys. A file that names anything
-# else is refused before a single field inside it is read.
+# template, the complete set of top-level keys, and the complete set of `spec`
+# keys. Both sets are equality, not containment, because a HelmRelease can ask
+# for a second Pod with no values key at all — `postRenderers` patching the
+# rendered Deployment, `valuesFrom` reading a ConfigMap this file set does not
+# hold, `targetNamespace` moving the release out of its namespace — and the
+# same shape holds for the other three kinds. A file that carries anything else
+# is refused before a single field inside it is read.
 ENVELOPES = {
     "kustomization.yaml": ("kustomize.config.k8s.io/v1beta1", "Kustomization", None,
-                           frozenset({"apiVersion", "kind", "resources"})),
+                           frozenset({"apiVersion", "kind", "resources"}), None),
     "default-deny.yaml": ("networking.k8s.io/v1", "NetworkPolicy", "default-deny",
-                          frozenset({"apiVersion", "kind", "metadata", "spec"})),
+                          frozenset({"apiVersion", "kind", "metadata", "spec"}),
+                          frozenset({"podSelector", "policyTypes"})),
     "source.yaml": ("source.toolkit.fluxcd.io/v1", "OCIRepository", "{slug}-chart",
-                    frozenset({"apiVersion", "kind", "metadata", "spec"})),
+                    frozenset({"apiVersion", "kind", "metadata", "spec"}),
+                    frozenset({"interval", "layerSelector", "ref", "timeout", "url", "verify"})),
     "release.yaml": ("helm.toolkit.fluxcd.io/v2", "HelmRelease", "{slug}",
-                     frozenset({"apiVersion", "kind", "metadata", "spec"})),
+                     frozenset({"apiVersion", "kind", "metadata", "spec"}),
+                     frozenset({"chartRef", "driftDetection", "install", "interval",
+                                "maxHistory", "releaseName", "serviceAccountName",
+                                "suspend", "upgrade", "values"})),
 }
+RESOURCE_ENTRY = re.compile(r'^  - (?P<name>[a-z0-9-]+\.yaml)$')
 RECEIPT = Path("docs/assurance/195-chart-acquisition-receipt.json")
 VERSION_LINE = re.compile(r'^    platform\.snaraj\.dev/chart-release: "([0-9.]+)"$', re.MULTILINE)
 DIGEST_LINE = re.compile(r'^    digest: (sha256:[0-9a-f]{64})$', re.MULTILINE)
@@ -305,7 +316,7 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
     refused here for naming the wrong thing, not later for holding the wrong
     field, and the values guard below is reachable only through this function.
     """
-    api_version, kind, name_template, top_keys = ENVELOPES[name]
+    api_version, kind, name_template, top_keys, spec_keys = ENVELOPES[name]
     numbered = closed_document(payload.decode("utf-8"))
     top: dict[str, tuple[int, str]] = {}
     for number, raw in numbered:
@@ -325,6 +336,16 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
     if top["apiVersion"][1] != api_version or top["kind"][1] != kind:
         raise ValueError(f"{name} does not name a {api_version} {kind}")
     if name_template is None:
+        listed = []
+        for number, raw in block_body(numbered, top["resources"][0], 0):
+            if not raw.strip() or raw.lstrip().startswith("#"):
+                continue
+            entry = RESOURCE_ENTRY.fullmatch(raw)
+            if entry is None:
+                raise ValueError(f"line {number}: resources entry is not a composed manifest of this application")
+            listed.append(entry.group("name"))
+        if tuple(listed) != FILES[1:]:
+            raise ValueError(f"{name} does not compose exactly the other files of this application")
         return None
     sole_key(numbered, "spec")
     if top["metadata"][1] or top["spec"][1]:
@@ -334,7 +355,14 @@ def manifest_envelope(payload: bytes, name: str, slug: str) -> list[tuple[int, s
     observed = (fields.get("name", (0, ""))[1], fields.get("namespace", (0, ""))[1])
     if any(BARE_SCALAR.fullmatch(value) is None for value in observed) or observed != expected:
         raise ValueError(f"{name} does not name {expected[1]}/{expected[0]}")
-    return block_body(numbered, top["spec"][0], 0)
+    spec_lines = block_body(numbered, top["spec"][0], 0)
+    declared = bare_keys(spec_lines, 2, "spec")
+    for key in sorted(set(declared) - spec_keys):
+        raise ValueError(f"line {declared[key][0]}: {key} is not a spec key of the reviewed {kind}")
+    if spec_keys - set(declared):
+        missing = ", ".join(sorted(spec_keys - set(declared)))
+        raise ValueError(f"{name} is missing spec keys of the reviewed {kind}: {missing}")
+    return spec_lines
 
 
 def values_body(spec_lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
