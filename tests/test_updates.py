@@ -301,8 +301,17 @@ class UpdatesTests(unittest.TestCase):
             updates.latest(intruder, self.github)
 
     def test_a_proposal_cannot_write_a_pending_application_path(self):
-        """The allowed-path set is derived from ACTIVE applications only."""
+        """The allowed-path set is derived from ACTIVE applications only.
 
+        The pending subject is declared HERE, inside the test and before the
+        baseline commit, so the denial below has something to deny. At a head
+        whose pending map was empty this loop ran zero times and the test
+        passed by checking nothing — a vacuous pass a delta review caught —
+        and the count at the end is what refuses that shape from now on.
+        """
+
+        pending = self.pending_application()
+        self.assertIn(pending, updates.validate.PENDING_APPLICATIONS)
         env = updates.publication.git_environment()
         def git(*args):
             return subprocess.run(["git", "-C", str(self.root), *args], check=True,
@@ -320,7 +329,9 @@ class UpdatesTests(unittest.TestCase):
         # extra file. Declaring the pending path in `files` too makes the
         # changed-equals-planned check pass, so the only thing left standing
         # between the proposal and a pending application is `allowed` itself.
+        denied = []
         for slug in sorted(updates.validate.PENDING_APPLICATIONS):
+            denied.append(slug)
             relative = f"kubernetes/websites/{slug}/source.yaml"
             path = self.root / relative
             original = path.read_bytes()
@@ -335,6 +346,7 @@ class UpdatesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unexpected paths"):
                 updates.verify_delta(self.root, base, files)
             path.write_bytes(original)
+        self.assertEqual(denied, [pending], "the denial ran against the declared pending subject")
 
     def test_the_publication_surface_admits_no_undeclared_application(self):
         """A fourth directory is refused by the publication gate as well.
