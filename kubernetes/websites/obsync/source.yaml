@@ -20,7 +20,7 @@
 # false, 1 when true — instead of only reaching an annotation. `v0.1.3` is a
 # complete Release and verifies, but its value was annotation-only and its
 # render carried a one-replica Deployment either way, which is a claim rather
-# than a gate; a reviewer found that and the publisher was fixed rather than the
+# than a gate; a reviewer found that and the chart was fixed rather than the
 # claim reworded. `v0.1.2` exists as a Git tag with an attested image, but the
 # publisher pushed no chart for it and cut no Release, so there is nothing at
 # `charts/obsync:0.1.2` to select at all.
