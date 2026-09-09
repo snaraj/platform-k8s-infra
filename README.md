@@ -28,6 +28,9 @@ v0.1.3, so the fail-closed sentinel is replaced by the acquired digest, the
 release is unsuspended, and it holds a receipt record like any other active
 application. Its `deploymentReady` value stays `false` — that one describes the
 cluster, not this repository, and selecting a verified chart does not move it.
+At `false` the selected chart still renders its object set and holds the
+Deployment at zero application replicas; the operator's reconciler, created
+suspended, is what keeps any of it from reaching the cluster.
 `PENDING_APPLICATIONS` is now empty — the state is unused, not retired, and the
 next application whose publisher has not cut a release enters it. The decision
 admitting obsync is

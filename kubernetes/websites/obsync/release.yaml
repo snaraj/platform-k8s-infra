@@ -68,10 +68,27 @@ spec:
     # CLUSTER rather than this repository — which is why selecting a verified
     # chart does not move it. It stays false until the `obsidian` namespace, the
     # `obsync-blobs` and `obsync-journal` PersistentVolumes and the
-    # `obsync-server-key` Secret all exist. None of that is confirmed: the
+    # `obsync-server-key` Secret all exist, and none of that is confirmed: the
     # cluster's storage-admission and bootstrap-prerequisite gates are still
-    # unsatisfied, so it is false here and this release renders no workload even
-    # with a real digest selected. Flipping it is its own reviewed change
+    # unsatisfied.
+    #
+    # What `false` MEANS in the selected chart, stated exactly, because the
+    # predecessor of this comment overstated it. obsync v0.1.4 renders the SAME
+    # object set at either value — ServiceAccount, Service, NetworkPolicy, both
+    # PersistentVolumeClaims and the Deployment — and `false` sets ZERO
+    # application replicas rather than omitting anything. `true` scales that
+    # Deployment to its one replica and changes nothing else; a non-boolean
+    # value is refused by the chart's closed schema. The claims render at
+    # `false` deliberately, so they bind their pre-provisioned volumes before
+    # any Pod exists, and the Service renders so the TLS proxy can resolve it.
+    #
+    # Two consequences. Objects DO render, so the stop before the cluster is the
+    # operator's reconciler — created SUSPENDED, unsuspended only after the
+    # prerequisites above are proven — and not this value alone. And v0.1.3
+    # carried this value into the `platform.snaraj.dev/deployment-ready`
+    # annotation only, rendering the one-replica Deployment regardless: that
+    # was a claim rather than a gate, which is why the selection moved to
+    # v0.1.4. Flipping this to `true` is its own reviewed one-line change
     # against prerequisites the operator proved, never a side effect of
     # selecting a chart.
     deploymentReady: false

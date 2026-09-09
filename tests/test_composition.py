@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -164,34 +165,72 @@ class CompositionTests(unittest.TestCase):
     # pending rule that only ever fires on pending input would let the active
     # rule rot unnoticed and vice versa.
 
-    def pending_slug(self):
-        """The pending application under test, or skip if none is declared.
+    def pending_application(self, slug="pending-fixture", template="obsync"):
+        """Declare a synthetic PENDING application, and prove it admissible.
 
-        Promotion empties `PENDING_APPLICATIONS`, and the honest response is a
-        SKIP rather than a deletion or a vacuous pass: the rules are still
-        enforced in `scripts/validate.py` and the next application whose
-        publisher has not cut a release will need every one of these tests. A
-        skip says "no subject today"; a quietly green test would say "proven".
+        Activation emptied `PENDING_APPLICATIONS`, and the predecessor answered
+        that with a SKIP in every test below. Review proved the answer wrong:
+        those callers were not all pending-only contracts. The signer
+        matcher-list closure, document and spec closure, the fetch-path closure,
+        the storage refusal and the undeclared-directory refusal are GENERAL
+        rules with three ACTIVE subjects, and skipping them lost a real
+        regression detector — the suite stayed green with the matcher-list guard
+        deleted. Those tests now run against the active applications, and this
+        fixture carries the four rules that are genuinely pending-only, so they
+        are exercised against a declared pending application rather than parked
+        until one exists again.
+
+        The fixture is an active application's directory copied under a new
+        slug, inventoried and byte-pinned like any other, with the two pending
+        INVERSIONS applied: the sentinel digest, and a release that is suspended
+        and not ready. `check` runs before this returns, so the fixture is
+        proven admissible and every refusal below is caused by the mutation
+        under test rather than by the fixture.
         """
 
-        slugs = sorted(composition.PENDING_APPLICATIONS)
-        if not slugs:
-            self.skipTest("no application is pending; the rules stand unexercised")
-        self.assertEqual(len(slugs), 1, "at most one pending application is declared")
-        return slugs[0]
+        composition.PENDING_APPLICATIONS[slug] = slug
+        composition.NAMESPACES[slug] = composition.NAMESPACES[template]
+        self.addCleanup(composition.PENDING_APPLICATIONS.pop, slug, None)
+        self.addCleanup(composition.NAMESPACES.pop, slug, None)
+        source = self.root / "kubernetes/websites" / template
+        target = self.root / "kubernetes/websites" / slug
+        target.mkdir()
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        shapes = json.loads(shapes_path.read_text())
+        for name in composition.FILES:
+            text = (source / name).read_text().replace(template, slug)
+            if name == "source.yaml":
+                text = composition.DIGEST_LINE.sub(
+                    "    digest: " + composition.SENTINEL_DIGEST, text)
+            if name == "release.yaml":
+                text = composition.SUSPEND_LINE.sub("  suspend: true", text)
+                text = composition.READY_LINE.sub("    deploymentReady: false", text)
+            (target / name).write_text(text)
+            relative = f"kubernetes/websites/{slug}/{name}"
+            normalized, _, _ = composition.normalized_manifest(
+                (target / name).read_bytes(), name == "source.yaml", True
+            )
+            shapes[relative] = hashlib.sha256(normalized).hexdigest()
+        shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+        composition.check(self.root)
+        return slug
 
     def test_the_two_maps_are_disjoint_and_the_boundary_covers_both(self):
+        self.assertEqual(
+            set(composition.APPLICATIONS) & set(composition.PENDING_APPLICATIONS), set()
+        )
+        slug = self.pending_application()
         self.assertEqual(
             set(composition.APPLICATIONS) & set(composition.PENDING_APPLICATIONS), set()
         )
         selections, receipt = composition.check(self.root)
         # The positive control the rest of this block needs: a pending
         # application contributes NO selection and NO receipt record, and the
-        # two active applications are untouched by its presence.
+        # three active applications are untouched by its presence.
         self.assertEqual(set(selections), set(composition.APPLICATIONS))
         self.assertEqual(set(receipt["records"]), set(composition.APPLICATIONS))
-        self.assertNotIn(self.pending_slug(), selections)
-        self.assertNotIn(self.pending_slug(), receipt["records"])
+        self.assertNotIn(slug, selections)
+        self.assertNotIn(slug, receipt["records"])
 
     def test_the_declared_application_repository_is_load_bearing(self):
         """The map VALUE must change an outcome, or it is documentation.
@@ -204,9 +243,12 @@ class CompositionTests(unittest.TestCase):
         checked against the manifest's own publisher subject instead.
 
         Both maps are exercised here, because a rule that only fired on pending
-        input would let the active binding rot unnoticed.
+        input would let the active binding rot unnoticed. The pending half is a
+        declared fixture rather than whatever happens to be pending today, so
+        emptying the map cannot quietly retire it.
         """
 
+        self.pending_application()
         for attribute in ("APPLICATIONS", "PENDING_APPLICATIONS"):
             declared = getattr(composition, attribute)
             for slug, repository in sorted(declared.items()):
@@ -227,6 +269,24 @@ class CompositionTests(unittest.TestCase):
                         declared.update(original)
         composition.check(self.root)
 
+    def test_the_identity_binding_holds_on_its_own_and_not_only_behind_the_matcher(self):
+        """Two guards reach the same conclusion; only one of them is exercised.
+
+        Through `check`, a substituted publisher is refused by the matcher-list
+        closure BEFORE the identity binding reads it, so deleting the binding's
+        subject comparison leaves the whole suite green — a surviving mutant,
+        and the kind of redundancy that quietly stops being redundant when one
+        of the two is refactored. The binding is therefore exercised directly:
+        both halves of the declaration must decide an outcome by themselves.
+        """
+
+        payload = (self.root / "kubernetes/websites/obsync/source.yaml").read_bytes()
+        composition.identity_errors(payload, "obsync", "obsync")
+        with self.assertRaisesRegex(ValueError, "publisher identity is not the declared"):
+            composition.identity_errors(payload, "obsync", "foreign-publisher")
+        with self.assertRaisesRegex(ValueError, "chart repository is not the declared"):
+            composition.identity_errors(payload, "foreign-slug", "obsync")
+
     def test_a_substituted_identity_survives_a_re_pin_and_is_still_refused(self):
         """The bypass the byte pins cannot see, which is why this check exists.
 
@@ -239,6 +299,7 @@ class CompositionTests(unittest.TestCase):
         """
 
         shapes_path = self.root / "policies/manifest-shapes.json"
+        self.pending_application()
         for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
             relative = f"kubernetes/websites/{slug}/source.yaml"
             path = self.root / relative
@@ -327,6 +388,7 @@ class CompositionTests(unittest.TestCase):
             "    replicas: &anchor 2",
             "    replicas: 2 # inline",
         )
+        self.pending_application()
         for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
             relative = f"kubernetes/websites/{slug}/release.yaml"
             path = self.root / relative
@@ -379,80 +441,85 @@ class CompositionTests(unittest.TestCase):
         decoy is refused for naming the wrong thing before any field is read.
 
         Each fixture is RE-PINNED before `check` runs, so nothing here is caught
-        by the byte hash, and each names what was closed.
+        by the byte hash, and each names what was closed. Every ACTIVE
+        application is a subject: document closure is a general rule, and the
+        decoy it refuses is written against a real reconciled release rather
+        than against whichever slug happens to be pending.
         """
 
         shapes_path = self.root / "policies/manifest-shapes.json"
-        slug = self.pending_slug()
-        relative = f"kubernetes/websites/{slug}/release.yaml"
-        path = self.root / relative
-        original, original_shapes = path.read_text(), shapes_path.read_text()
+        for slug in sorted(composition.APPLICATIONS):
+            namespace = composition.NAMESPACES[slug]
+            relative = f"kubernetes/websites/{slug}/release.yaml"
+            path = self.root / relative
+            original, original_shapes = path.read_text(), shapes_path.read_text()
 
-        decoy = """---
+            decoy = f"""---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: obsync-values-guard
-  "namespace": obsidian
+  name: {slug}-values-guard
+  "namespace": {namespace}
 spec:
   "suspend": false
-  "serviceAccountName": obsync-helm-reconciler
+  "serviceAccountName": helm-reconciler
   chartRef:
     kind: OCIRepository
-    "name": obsync-chart
+    "name": {slug}-chart
   values:
-    publicUrl: ""
+    deploymentReady: false
 """
-        # The escape is the point: `"valu\\x65s"` is neither a bare key nor a
-        # quoted spelling of one, so the round-3 scanner skipped it, found the
-        # decoy's bare `values:`, and reported a block the consumer never reads.
-        escaped = '  "valu' + chr(92) + 'x65s":'
-        primary = original.replace("  values:", escaped + "\n    replicas: 2", 1)
-        two_documents = primary + decoy
+            # The escape is the point: `"valu\\x65s"` is neither a bare key nor
+            # a quoted spelling of one, so the round-3 scanner skipped it, found
+            # the decoy's bare `values:`, and reported a block the consumer
+            # never reads.
+            escaped = '  "valu' + chr(92) + 'x65s":'
+            primary = original.replace("  values:", escaped + "\n    replicas: 2", 1)
+            two_documents = primary + decoy
 
-        # The decoy is what a file-wide scan would have read, and on its own it
-        # asks for nothing: only document closure catches this file.
-        self.assertIn(escaped, two_documents)
-        self.assertIn("\n  values:\n    publicUrl:", decoy)
-        self.assertNotIn(
-            "replicas",
-            "\n".join(line for line in decoy.splitlines() if line.startswith("    ")),
-        )
+            # The decoy is what a file-wide scan would have read, and on its own
+            # it asks for nothing: only document closure catches this file.
+            self.assertIn(escaped, two_documents)
+            self.assertIn("\n  values:\n    deploymentReady:", decoy)
+            self.assertNotIn(
+                "replicas",
+                "\n".join(line for line in decoy.splitlines() if line.startswith("    ")),
+            )
 
-        fixtures = (
-            ("the reviewer's two-document decoy", two_documents,
-             "exactly one YAML document"),
-            ("a document terminator", original.rstrip("\n") + "\n...\n",
-             "exactly one YAML document"),
-            ("a YAML directive", "%YAML 1.2\n" + original,
-             "a YAML directive is outside the closed document form"),
-            ("a second top-level spec", original.rstrip("\n") + "\nspec:\n  suspend: true\n",
-             "duplicate top-level key spec"),
-            ("a second values key", original.replace(
-                "  values:", "  values:\n    publicUrl: \"\"\n  values:", 1),
-             "duplicate spec key values|exactly one values key"),
-            ("an unexpected top-level key", original.rstrip("\n") + "\nstatus:\n  observed: true\n",
-             "exact top-level keys of a HelmRelease"),
-            ("the wrong kind", original.replace("kind: HelmRelease", "kind: HelmChart", 1),
-             "does not name a helm.toolkit.fluxcd.io/v2 HelmRelease"),
-            ("the wrong namespace", original.replace(
-                "  namespace: obsidian", "  namespace: kube-system", 1),
-             "does not name obsidian/obsync"),
-            ("a quoted metadata name", original.replace(
-                "  name: obsync\n", '  "name": obsync\n', 1),
-             "metadata key is not a bare, unquoted, untagged spelling"),
-        )
-        for label, mutated, expected in fixtures:
-            path.write_text(mutated)
-            shapes = json.loads(original_shapes)
-            normalized, _, _ = composition.normalized_manifest(path.read_bytes(), False, True)
-            shapes[relative] = hashlib.sha256(normalized).hexdigest()
-            shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
-            with self.subTest(fixture=label):
-                with self.assertRaisesRegex(ValueError, expected):
-                    composition.check(self.root)
-            path.write_text(original)
-            shapes_path.write_text(original_shapes)
+            fixtures = (
+                ("the reviewer's two-document decoy", two_documents,
+                 "exactly one YAML document"),
+                ("a document terminator", original.rstrip("\n") + "\n...\n",
+                 "exactly one YAML document"),
+                ("a YAML directive", "%YAML 1.2\n" + original,
+                 "a YAML directive is outside the closed document form"),
+                ("a second top-level spec", original.rstrip("\n") + "\nspec:\n  suspend: true\n",
+                 "duplicate top-level key spec"),
+                ("a second values key", original.replace(
+                    "  values:", "  values:\n    deploymentReady: false\n  values:", 1),
+                 "duplicate spec key values|exactly one values key"),
+                ("an unexpected top-level key", original.rstrip("\n") + "\nstatus:\n  observed: true\n",
+                 "exact top-level keys of a HelmRelease"),
+                ("the wrong kind", original.replace("kind: HelmRelease", "kind: HelmChart", 1),
+                 "does not name a helm.toolkit.fluxcd.io/v2 HelmRelease"),
+                ("the wrong namespace", original.replace(
+                    f"  namespace: {namespace}", "  namespace: kube-system", 1),
+                 f"does not name {namespace}/{slug}"),
+                ("a quoted metadata name", original.replace(
+                    f"  name: {slug}\n", f'  "name": {slug}\n', 1),
+                 "metadata key is not a bare, unquoted, untagged spelling"),
+            )
+            for label, mutated, expected in fixtures:
+                path.write_text(mutated)
+                shapes = json.loads(original_shapes)
+                normalized, _, _ = composition.normalized_manifest(path.read_bytes(), False, False)
+                shapes[relative] = hashlib.sha256(normalized).hexdigest()
+                shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+                with self.subTest(slug=slug, fixture=label):
+                    with self.assertRaisesRegex(ValueError, expected):
+                        composition.check(self.root)
+                path.write_text(original)
+                shapes_path.write_text(original_shapes)
         composition.check(self.root)
 
     def test_a_spec_key_the_reviewed_manifest_does_not_carry_is_refused(self):
@@ -468,25 +535,25 @@ spec:
         an OCIRepository `secretRef` changes who fetches the chart.
 
         So `spec` carries exactly the keys the reviewed manifest carries, by
-        equality. Each fixture is RE-PINNED before `check` runs.
+        equality. Each fixture is RE-PINNED before `check` runs, and every
+        ACTIVE application is a subject: an unclosed `spec` on a reconciled
+        release is the case that matters, not one on a suspended placeholder.
         """
 
         shapes_path = self.root / "policies/manifest-shapes.json"
-        slug = self.pending_slug()
-        shapes_source = shapes_path.read_text()
 
-        def refuse(name, mutate, expected, label):
+        def refuse(slug, name, mutate, expected, label):
             relative = f"kubernetes/websites/{slug}/{name}"
             path = self.root / relative
-            original = path.read_text()
+            original, shapes_source = path.read_text(), shapes_path.read_text()
             path.write_text(mutate(original))
             shapes = json.loads(shapes_source)
             normalized, _, _ = composition.normalized_manifest(
-                path.read_bytes(), name == "source.yaml", True
+                path.read_bytes(), name == "source.yaml", False
             )
             shapes[relative] = hashlib.sha256(normalized).hexdigest()
             shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
-            with self.subTest(fixture=label):
+            with self.subTest(slug=slug, fixture=label):
                 with self.assertRaisesRegex(ValueError, expected):
                     composition.check(self.root)
             path.write_text(original)
@@ -503,46 +570,57 @@ spec:
             "                path: /spec/replicas\n"
             "                value: 2\n"
         )
-        release = (self.root / f"kubernetes/websites/{slug}/release.yaml").read_text()
-        # Nothing in this file asks for a second Pod through values, so spec
-        # closure is the only thing between the patch and the rendered object.
-        self.assertNotIn("replicas", release)
+        for slug in sorted(composition.APPLICATIONS):
+            # Nothing in this file ASKS for a second Pod through values, so spec
+            # closure is the only thing between the patch and the rendered
+            # object. Read the way the guard reads — the closed values block, not
+            # the file: a comment may discuss replicas, and one of these files
+            # does, but a comment cannot ask for a Pod.
+            payload = (self.root / f"kubernetes/websites/{slug}/release.yaml").read_bytes()
+            spec_lines = composition.manifest_envelope(
+                payload, "release.yaml", slug, composition.APPLICATIONS[slug])
+            values = composition.parse_values_block(composition.values_body(spec_lines))
+            self.assertFalse({key.casefold() for key in values} & composition.SECOND_POD_KEYS)
+            elsewhere = sorted(set(composition.APPLICATIONS) - {slug})[0]
 
-        for name, mutate, expected, label in (
-            ("release.yaml", lambda text: text.rstrip("\n") + "\n" + post_renderers,
-             "postRenderers is not a spec key of the reviewed HelmRelease",
-             "postRenderers patching replicas"),
-            ("release.yaml", lambda text: text.rstrip("\n")
-             + "\n  valuesFrom:\n    - kind: ConfigMap\n      name: obsync-overrides\n",
-             "valuesFrom is not a spec key of the reviewed HelmRelease",
-             "valuesFrom naming a ConfigMap"),
-            ("release.yaml", lambda text: text.rstrip("\n") + "\n  targetNamespace: kube-system\n",
-             "targetNamespace is not a spec key of the reviewed HelmRelease",
-             "targetNamespace"),
-            ("release.yaml", lambda text: text.replace("  suspend: true\n", "", 1),
-             "missing spec keys of the reviewed HelmRelease: suspend",
-             "a removed spec key"),
-            ("default-deny.yaml", lambda text: text.rstrip("\n")
-             + "\n  ingress:\n    - {}\n",
-             "ingress is not a spec key of the reviewed NetworkPolicy",
-             "an allow-all ingress rule"),
-            ("source.yaml", lambda text: text.rstrip("\n")
-             + "\n  secretRef:\n    name: registry-credential\n",
-             "secretRef is not a spec key of the reviewed OCIRepository",
-             "a registry credential"),
-            ("kustomization.yaml", lambda text: text.rstrip("\n")
-             + "\npatches:\n  - path: replicas.yaml\n",
-             "does not carry the exact top-level keys of a Kustomization",
-             "a Kustomization patches list"),
-            ("kustomization.yaml", lambda text: text.rstrip("\n") + "\n  - extra.yaml\n",
-             "does not compose exactly the other files of this application",
-             "a fifth resource"),
-            ("kustomization.yaml",
-             lambda text: text.replace("  - source.yaml", "  - ../naranjo-online/source.yaml", 1),
-             "resources entry is not a composed manifest of this application",
-             "a resource outside this application"),
-        ):
-            refuse(name, mutate, expected, label)
+            for name, mutate, expected, label in (
+                ("release.yaml", lambda text: text.rstrip("\n") + "\n" + post_renderers,
+                 "postRenderers is not a spec key of the reviewed HelmRelease",
+                 "postRenderers patching replicas"),
+                ("release.yaml", lambda text: text.rstrip("\n")
+                 + "\n  valuesFrom:\n    - kind: ConfigMap\n      name: overrides\n",
+                 "valuesFrom is not a spec key of the reviewed HelmRelease",
+                 "valuesFrom naming a ConfigMap"),
+                ("release.yaml", lambda text: text.rstrip("\n") + "\n  targetNamespace: kube-system\n",
+                 "targetNamespace is not a spec key of the reviewed HelmRelease",
+                 "targetNamespace"),
+                # The suspend line is removed by its own pattern rather than by
+                # a literal, because its VALUE differs between an active release
+                # and a pending one and a literal would silently match neither.
+                ("release.yaml", lambda text: composition.SUSPEND_LINE.sub("", text, count=1),
+                 "missing spec keys of the reviewed HelmRelease: suspend",
+                 "a removed spec key"),
+                ("default-deny.yaml", lambda text: text.rstrip("\n")
+                 + "\n  ingress:\n    - {}\n",
+                 "ingress is not a spec key of the reviewed NetworkPolicy",
+                 "an allow-all ingress rule"),
+                ("source.yaml", lambda text: text.rstrip("\n")
+                 + "\n  secretRef:\n    name: registry-credential\n",
+                 "secretRef is not a spec key of the reviewed OCIRepository",
+                 "a registry credential"),
+                ("kustomization.yaml", lambda text: text.rstrip("\n")
+                 + "\npatches:\n  - path: replicas.yaml\n",
+                 "does not carry the exact top-level keys of a Kustomization",
+                 "a Kustomization patches list"),
+                ("kustomization.yaml", lambda text: text.rstrip("\n") + "\n  - extra.yaml\n",
+                 "does not compose exactly the other files of this application",
+                 "a fifth resource"),
+                ("kustomization.yaml",
+                 lambda text: text.replace("  - source.yaml", f"  - ../{elsewhere}/source.yaml", 1),
+                 "resources entry is not a composed manifest of this application",
+                 "a resource outside this application"),
+            ):
+                refuse(slug, name, mutate, expected, label)
         composition.check(self.root)
 
     def test_a_fetch_path_field_the_reviewed_manifest_does_not_carry_is_refused(self):
@@ -554,55 +632,56 @@ spec:
         chart. `chartRef.namespace` is the third: it points the release at
         another namespace's source. The values path is closed by the grammar and
         the identity path by the identity binding, so this is the fetch path,
-        and it is three keys — closed by exact key set and exact value.
+        and it is three keys - closed by exact key set and exact value. Every
+        ACTIVE application is a subject, because a moved fetch path only matters
+        where something fetches.
         """
 
         shapes_path = self.root / "policies/manifest-shapes.json"
-        slug = self.pending_slug()
-        shapes_source = shapes_path.read_text()
 
-        def refuse(name, before, after, expected, label):
+        def refuse(slug, name, before, after, expected, label):
             relative = f"kubernetes/websites/{slug}/{name}"
             path = self.root / relative
-            original = path.read_text()
+            original, shapes_source = path.read_text(), shapes_path.read_text()
             self.assertEqual(original.count(before), 1)
             path.write_text(original.replace(before, after, 1))
             shapes = json.loads(shapes_source)
             normalized, _, _ = composition.normalized_manifest(
-                path.read_bytes(), name == "source.yaml", True
+                path.read_bytes(), name == "source.yaml", False
             )
             shapes[relative] = hashlib.sha256(normalized).hexdigest()
             shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
-            with self.subTest(fixture=label):
+            with self.subTest(slug=slug, fixture=label):
                 with self.assertRaisesRegex(ValueError, expected):
                     composition.check(self.root)
             path.write_text(original)
             shapes_path.write_text(shapes_source)
 
         digest = "    digest: sha256:"
-        for name, before, after, expected, label in (
-            ("source.yaml", digest, "    tag: latest\n" + digest,
-             "tag is not a spec.ref field of the reviewed OCIRepository",
-             "ref.tag beside the digest"),
-            ("source.yaml", digest, "    semver: '>=0.1.0'\n" + digest,
-             "semver is not a spec.ref field of the reviewed OCIRepository",
-             "ref.semver beside the digest"),
-            ("source.yaml", "    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-             "    mediaType: application/octet-stream",
-             "spec.layerSelector.mediaType is not the reviewed",
-             "a layer selector that selects no chart"),
-            ("source.yaml", "    operation: copy", "    operation: extract",
-             "spec.layerSelector.operation is not the reviewed copy",
-             "layerSelector.operation away from the reviewed copy"),
-            ("release.yaml", "    name: obsync-chart",
-             "    name: obsync-chart\n    namespace: kube-system",
-             "namespace is not a spec.chartRef field of the reviewed HelmRelease",
-             "chartRef.namespace"),
-            ("release.yaml", "    kind: OCIRepository", "    kind: HelmRepository",
-             "spec.chartRef.kind is not the reviewed OCIRepository",
-             "chartRef.kind"),
-        ):
-            refuse(name, before, after, expected, label)
+        for slug in sorted(composition.APPLICATIONS):
+            for name, before, after, expected, label in (
+                ("source.yaml", digest, "    tag: latest\n" + digest,
+                 "tag is not a spec.ref field of the reviewed OCIRepository",
+                 "ref.tag beside the digest"),
+                ("source.yaml", digest, "    semver: '>=0.1.0'\n" + digest,
+                 "semver is not a spec.ref field of the reviewed OCIRepository",
+                 "ref.semver beside the digest"),
+                ("source.yaml", "    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+                 "    mediaType: application/octet-stream",
+                 "spec.layerSelector.mediaType is not the reviewed",
+                 "a layer selector that selects no chart"),
+                ("source.yaml", "    operation: copy", "    operation: extract",
+                 "spec.layerSelector.operation is not the reviewed copy",
+                 "layerSelector.operation away from the reviewed copy"),
+                ("release.yaml", f"    name: {slug}-chart",
+                 f"    name: {slug}-chart\n    namespace: kube-system",
+                 "namespace is not a spec.chartRef field of the reviewed HelmRelease",
+                 "chartRef.namespace"),
+                ("release.yaml", "    kind: OCIRepository", "    kind: HelmRepository",
+                 "spec.chartRef.kind is not the reviewed OCIRepository",
+                 "chartRef.kind"),
+            ):
+                refuse(slug, name, before, after, expected, label)
         composition.check(self.root)
 
     def test_a_second_signer_matcher_cannot_be_smuggled_beside_the_reviewed_one(self):
@@ -616,61 +695,73 @@ spec:
         two reviewed lines, compared with indentation, dash and value, so the
         reviewed matcher being present proves nothing on its own.
 
-        Each fixture is RE-PINNED before `check` runs.
+        Each fixture is RE-PINNED before `check` runs, and every ACTIVE
+        application is a subject. That is the repair for a review finding of its
+        own: while this ran only against a pending application, emptying the
+        pending map skipped it, and the whole suite stayed green with
+        `reviewed_matcher_errors` deleted from `scripts/validate.py`. A guard
+        over the signer list of three reconciled sources cannot be covered by a
+        test that runs only when a fourth, suspended one happens to exist.
         """
 
         shapes_path = self.root / "policies/manifest-shapes.json"
-        slug = self.pending_slug()
-        relative = f"kubernetes/websites/{slug}/source.yaml"
-        path = self.root / relative
-        original, shapes_source = path.read_text(), shapes_path.read_text()
-        subject = original[original.index("        subject: "):].splitlines()[0]
+        for slug in sorted(composition.APPLICATIONS):
+            relative = f"kubernetes/websites/{slug}/source.yaml"
+            path = self.root / relative
+            original, shapes_source = path.read_text(), shapes_path.read_text()
+            subject = original[original.index("        subject: "):].splitlines()[0]
+            # Another declared application's publisher, derived from the map so
+            # this is a real substitution rather than a typo.
+            elsewhere = sorted(set(composition.APPLICATIONS) - {slug})[0]
+            foreign = "        subject: " + composition.publisher_subject(
+                "snaraj/" + composition.APPLICATIONS[elsewhere])
 
-        def refuse(mutated, expected, label):
-            path.write_text(mutated)
-            shapes = json.loads(shapes_source)
-            normalized, _, _ = composition.normalized_manifest(path.read_bytes(), True, True)
-            shapes[relative] = hashlib.sha256(normalized).hexdigest()
-            shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
-            with self.subTest(fixture=label):
-                with self.assertRaisesRegex(ValueError, expected):
-                    composition.check(self.root)
-            path.write_text(original)
-            shapes_path.write_text(shapes_source)
+            def refuse(mutated, expected, label, path=path, relative=relative,
+                       original=original, shapes_source=shapes_source, slug=slug):
+                path.write_text(mutated)
+                shapes = json.loads(shapes_source)
+                normalized, _, _ = composition.normalized_manifest(path.read_bytes(), True, False)
+                shapes[relative] = hashlib.sha256(normalized).hexdigest()
+                shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+                with self.subTest(slug=slug, fixture=label):
+                    with self.assertRaisesRegex(ValueError, expected):
+                        composition.check(self.root)
+                path.write_text(original)
+                shapes_path.write_text(shapes_source)
 
-        # The reviewer's own case: the reviewed matcher is left untouched, so
-        # only a whole-list closure can catch this file.
-        smuggled = original.replace(
-            subject + "\n", subject + "\n      - {issuer: '.*', subject: '.*'}\n", 1)
-        self.assertIn(subject, smuggled)
-        self.assertIn("      - issuer: ", smuggled)
+            # The reviewer's own case: the reviewed matcher is left untouched, so
+            # only a whole-list closure can catch this file.
+            smuggled = original.replace(
+                subject + "\n", subject + "\n      - {issuer: '.*', subject: '.*'}\n", 1)
+            self.assertIn(subject, smuggled)
+            self.assertIn("      - issuer: ", smuggled)
 
-        for mutated, expected, label in (
-            (smuggled, "admits a second matcher", "the reviewer's flow-style second matcher"),
-            (original.replace(subject + "\n", subject + "\n" + subject.replace(
-                "        subject: ", "      - issuer: ") + "\n" + subject + "\n", 1),
-             "admits a second matcher", "a second block-form matcher"),
-            (original.replace(subject, "        subject: >-\n          ^https://github\\.com/.*$", 1),
-             "is not the reviewed matcher", "a folded multiline subject"),
-            (original.replace("      - issuer: ^https", "      - issuer: ^http://token", 1),
-             "is not the reviewed matcher", "a changed issuer"),
-            (original.replace("snaraj/obsync/", "snaraj/naranjo.online/", 1),
-             "is not the reviewed matcher", "another repository's publisher"),
-            (original.replace("    provider: cosign", "    provider: keyless", 1),
-             "spec.verify.provider is not the reviewed cosign", "provider: keyless"),
-            (original.replace("    provider: cosign",
-                              "    secretRef:\n      name: registry\n    provider: cosign", 1),
-             "secretRef is not a spec.verify field of the reviewed OCIRepository",
-             "an extra verify key"),
-            (original.replace("      - issuer: ^https", "#     - issuer: ^https", 1).replace(
-                subject, "#" + subject[1:], 1),
-             "is missing the reviewed matcher", "matchOIDCIdentity emptied"),
-        ):
-            refuse(mutated, expected, label)
+            for mutated, expected, label in (
+                (smuggled, "admits a second matcher", "the reviewer's flow-style second matcher"),
+                (original.replace(subject + "\n", subject + "\n" + subject.replace(
+                    "        subject: ", "      - issuer: ") + "\n" + subject + "\n", 1),
+                 "admits a second matcher", "a second block-form matcher"),
+                (original.replace(subject, "        subject: >-\n          ^https://github\\.com/.*$", 1),
+                 "is not the reviewed matcher", "a folded multiline subject"),
+                (original.replace("      - issuer: ^https", "      - issuer: ^http://token", 1),
+                 "is not the reviewed matcher", "a changed issuer"),
+                (original.replace(subject, foreign, 1),
+                 "is not the reviewed matcher", "another application's publisher"),
+                (original.replace("    provider: cosign", "    provider: keyless", 1),
+                 "spec.verify.provider is not the reviewed cosign", "provider: keyless"),
+                (original.replace("    provider: cosign",
+                                  "    secretRef:\n      name: registry\n    provider: cosign", 1),
+                 "secretRef is not a spec.verify field of the reviewed OCIRepository",
+                 "an extra verify key"),
+                (original.replace("      - issuer: ^https", "#     - issuer: ^https", 1).replace(
+                    subject, "#" + subject[1:], 1),
+                 "is missing the reviewed matcher", "matchOIDCIdentity emptied"),
+            ):
+                refuse(mutated, expected, label)
         composition.check(self.root)
 
     def test_an_application_cannot_be_active_and_pending_at_once(self):
-        """The overlap guard, exercised directly.
+        """The overlap guard, exercised directly against a declared fixture.
 
         Review finding: deleting this guard left the suite green, because
         nothing constructed the overlap it refuses. An application in both maps
@@ -679,8 +770,8 @@ spec:
         prevent.
         """
 
-        slug = self.pending_slug()
-        composition.APPLICATIONS[slug] = "obsync"
+        slug = self.pending_application()
+        composition.APPLICATIONS[slug] = slug
         try:
             with self.assertRaisesRegex(ValueError, "active and pending at once"):
                 composition.check(self.root)
@@ -689,7 +780,7 @@ spec:
         composition.check(self.root)
 
     def test_a_pending_selection_may_be_the_sentinel_and_nothing_else(self):
-        slug = self.pending_slug()
+        slug = self.pending_application()
         path = self.root / "kubernetes/websites" / slug / "source.yaml"
         original = path.read_text()
         self.assertIn(composition.SENTINEL_DIGEST, original)
@@ -704,16 +795,19 @@ spec:
     def test_an_active_selection_may_be_anything_but_the_sentinel(self):
         """The inverse arm, so neither rule can be deleted without a red run."""
 
-        path = self.root / "kubernetes/websites/naranjo-online/source.yaml"
-        original = path.read_text()
-        digest = composition.DIGEST_LINE.findall(original)[0]
-        path.write_text(original.replace(digest, composition.SENTINEL_DIGEST))
-        with self.assertRaisesRegex(ValueError, "invalid or unresolved"):
-            composition.check(self.root)
-        path.write_text(original)
+        for slug in sorted(composition.APPLICATIONS):
+            path = self.root / "kubernetes/websites" / slug / "source.yaml"
+            original = path.read_text()
+            digest = composition.DIGEST_LINE.findall(original)[0]
+            path.write_text(original.replace(digest, composition.SENTINEL_DIGEST))
+            with self.subTest(slug=slug):
+                with self.assertRaisesRegex(ValueError, "invalid or unresolved"):
+                    composition.check(self.root)
+            path.write_text(original)
+        composition.check(self.root)
 
     def test_a_pending_release_must_stay_suspended_and_not_ready(self):
-        slug = self.pending_slug()
+        slug = self.pending_application()
         path = self.root / "kubernetes/websites" / slug / "release.yaml"
         original = path.read_text()
         for before, after in (
@@ -726,59 +820,78 @@ spec:
                 with self.assertRaisesRegex(ValueError, "suspended and not ready"):
                     composition.check(self.root)
             path.write_text(original)
+        composition.check(self.root)
 
     def test_a_third_undeclared_directory_is_refused(self):
-        """A directory nobody declared is inventory, not composition."""
+        """A directory nobody declared is inventory, not composition.
+
+        Copied from an ACTIVE application, because that is what a real attempt
+        would copy and because this rule must hold whether or not anything is
+        pending.
+        """
 
         extra = self.root / "kubernetes/websites/undeclared"
         extra.mkdir()
-        source = self.root / "kubernetes/websites" / self.pending_slug()
+        source = self.root / "kubernetes/websites/obsync"
         for name in composition.FILES:
             (extra / name).write_bytes((source / name).read_bytes())
         with self.assertRaisesRegex(ValueError, "inventory"):
             composition.check(self.root)
 
-    def test_a_tag_or_a_second_digest_cannot_join_a_pending_selection(self):
-        slug = self.pending_slug()
-        path = self.root / "kubernetes/websites" / slug / "source.yaml"
-        original = path.read_text()
-        digest_line = "    digest: " + composition.SENTINEL_DIGEST
-        self.assertEqual(original.count(digest_line), 1)
-        for label, replacement, expected in (
-            ("tag beside the digest", digest_line + "\n    tag: v0.1.0",
-             "tag is not a spec.ref field"),
-            ("second digest", digest_line + "\n" + digest_line,
-             "duplicate spec.ref key digest|one version and one digest"),
-            ("semver range", digest_line + "\n    semver: \">=0.1.0\"",
-             "semver is not a spec.ref field"),
-        ):
-            with self.subTest(mutation=label):
-                path.write_text(original.replace(digest_line, replacement))
-                with self.assertRaisesRegex(ValueError, expected):
-                    composition.check(self.root)
-            path.write_text(original)
+    def test_a_tag_or_a_second_digest_cannot_join_a_selection(self):
+        """Closed over every ACTIVE selection, and over a pending one."""
 
-    def test_a_cross_namespace_reference_is_refused_in_the_pending_release(self):
-        slug = self.pending_slug()
-        path = self.root / "kubernetes/websites" / slug / "release.yaml"
-        original = path.read_text()
-        for before, after in (
-            ("    name: obsync-chart", "    name: obsync-chart\n    namespace: naranjo-online"),
-            ("  namespace: obsidian", "  namespace: naranjo-online"),
-            ("  serviceAccountName: obsync-helm-reconciler", "  serviceAccountName: default"),
-            ("  serviceAccountName: obsync-helm-reconciler", "  serviceAccountName: helm-reconciler"),
-        ):
-            with self.subTest(mutation=after):
-                self.assertEqual(original.count(before), 1)
-                path.write_text(original.replace(before, after))
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "reviewed application boundary"
-                    "|does not name obsidian/obsync"
-                    "|is not a spec.chartRef field of the reviewed",
-                ):
-                    composition.check(self.root)
-            path.write_text(original)
+        pending = self.pending_application()
+        for slug in sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS}):
+            path = self.root / "kubernetes/websites" / slug / "source.yaml"
+            original = path.read_text()
+            digest_line = "    digest: " + composition.DIGEST_LINE.findall(original)[0]
+            self.assertEqual(original.count(digest_line), 1)
+            if slug == pending:
+                self.assertIn(composition.SENTINEL_DIGEST, digest_line)
+            for label, replacement, expected in (
+                ("tag beside the digest", digest_line + "\n    tag: v0.1.0",
+                 "tag is not a spec.ref field"),
+                ("second digest", digest_line + "\n" + digest_line,
+                 "duplicate spec.ref key digest|one version and one digest"),
+                ("semver range", digest_line + "\n    semver: \">=0.1.0\"",
+                 "semver is not a spec.ref field"),
+            ):
+                with self.subTest(slug=slug, mutation=label):
+                    path.write_text(original.replace(digest_line, replacement))
+                    with self.assertRaisesRegex(ValueError, expected):
+                        composition.check(self.root)
+                path.write_text(original)
+        composition.check(self.root)
+
+    def test_a_cross_namespace_reference_is_refused_in_every_release(self):
+        """Cross-namespace reach is refused wherever a release can reconcile."""
+
+        for slug in sorted(composition.APPLICATIONS):
+            path = self.root / "kubernetes/websites" / slug / "release.yaml"
+            original = path.read_text()
+            namespace = composition.NAMESPACES[slug]
+            elsewhere = sorted(set(composition.NAMESPACES.values()) - {namespace})[0]
+            account = re.findall(r"^  serviceAccountName: (\S+)$", original, re.MULTILINE)[0]
+            other_account = "default-reconciler" if account != "default-reconciler" else "other"
+            for before, after in (
+                (f"    name: {slug}-chart", f"    name: {slug}-chart\n    namespace: {elsewhere}"),
+                (f"  namespace: {namespace}", f"  namespace: {elsewhere}"),
+                (f"  serviceAccountName: {account}", "  serviceAccountName: default"),
+                (f"  serviceAccountName: {account}", f"  serviceAccountName: {other_account}"),
+            ):
+                with self.subTest(slug=slug, mutation=after):
+                    self.assertEqual(original.count(before), 1)
+                    path.write_text(original.replace(before, after))
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "reviewed application boundary"
+                        f"|does not name {namespace}/{slug}"
+                        "|is not a spec.chartRef field of the reviewed",
+                    ):
+                        composition.check(self.root)
+                path.write_text(original)
+        composition.check(self.root)
 
     def test_composition_may_not_activate_storage(self):
         """Storage activation is an operator decision, never an application one.
@@ -787,23 +900,27 @@ spec:
         renders it, so nothing here needs a claim volume or a storage object.
         A manifest that declared one would be reaching past the application
         boundary into the volume, class and node path an operator owns; the
-        refusal names that rather than reporting a changed byte pin.
+        refusal names that rather than reporting a changed byte pin. Every
+        ACTIVE application is a subject: the refusal has to hold for the
+        releases that reconcile, not only for one that is suspended.
         """
 
-        slug = self.pending_slug()
-        path = self.root / "kubernetes/websites" / slug / "release.yaml"
-        original = path.read_text()
-        for label, addition in (
-            ("claim object", "---\napiVersion: v1\nkind: PersistentVolumeClaim\n"),
-            ("storage class", "---\napiVersion: storage.k8s.io/v1\nkind: StorageClass\n"),
-            ("claim volume", "    volumes:\n      - persistentVolumeClaim:\n          claimName: obsync-blobs\n"),
-            ("csi volume", "    volumes:\n      - csi:\n          driver: example\n"),
-        ):
-            with self.subTest(mutation=label):
-                path.write_text(original + addition)
-                with self.assertRaisesRegex(ValueError, "must not activate storage"):
-                    composition.check(self.root)
-            path.write_text(original)
+        for slug in sorted(composition.APPLICATIONS):
+            path = self.root / "kubernetes/websites" / slug / "release.yaml"
+            original = path.read_text()
+            for label, addition in (
+                ("claim object", "---\napiVersion: v1\nkind: PersistentVolumeClaim\n"),
+                ("storage class", "---\napiVersion: storage.k8s.io/v1\nkind: StorageClass\n"),
+                ("claim volume",
+                 "    volumes:\n      - persistentVolumeClaim:\n          claimName: obsync-blobs\n"),
+                ("csi volume", "    volumes:\n      - csi:\n          driver: example\n"),
+            ):
+                with self.subTest(slug=slug, mutation=label):
+                    path.write_text(original + addition)
+                    with self.assertRaisesRegex(ValueError, "must not activate storage"):
+                        composition.check(self.root)
+                path.write_text(original)
+        composition.check(self.root)
 
     def test_complete_record_schema_is_closed_before_network_access(self):
         original = self.receipt()

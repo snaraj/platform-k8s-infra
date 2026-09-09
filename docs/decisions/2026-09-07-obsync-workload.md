@@ -4,8 +4,11 @@ Date 2026-09-07. Status: the decision this document records has been reviewed,
 and the composition it accompanies is **activated in this repository** as of
 2026-09-08 — a verified chart is selected, the release is unsuspended, and the
 slug is active. Activation of the *repository* is not readiness of the
-*cluster*: `deploymentReady` stays `false` (§4), so the release renders no
-workload, and nothing here asserts a running one.
+*cluster*: `deploymentReady` stays `false` (§4), so the selected chart renders
+its Deployment with ZERO application replicas, and nothing here asserts a
+running workload. Nothing in this repository reconciles on its own either — the
+operator creates the reconciler suspended and lifts that suspension only after
+proving the prerequisites, which is the sequence §6 states.
 
 The contribution contract requires a new reviewed threat-model decision for
 "adding a workload or expanding a trust boundary". This is that decision for
@@ -28,7 +31,20 @@ two rule sets are opposites, so that change could not half-land.
 Still not admitted, and each is a separate later decision:
 
 - no running workload: `deploymentReady: false` — the value that describes the
-  CLUSTER — is unchanged, so the chart renders no Deployment and no claim;
+  CLUSTER — is unchanged, so the selected chart renders its Deployment with ZERO
+  application replicas. It does not omit objects, and an earlier version of this
+  document said it did. obsync v0.1.4 renders the same set at either value —
+  ServiceAccount, Service, NetworkPolicy, both PersistentVolumeClaims and the
+  Deployment — while `true` scales that Deployment to its one replica and
+  changes nothing else; a non-boolean value is refused by the chart's closed
+  schema. The claims render at `false` deliberately, so they bind their
+  pre-provisioned volumes before any Pod exists, and the Service renders so the
+  TLS proxy can resolve it. v0.1.3 carried the value into the
+  `platform.snaraj.dev/deployment-ready` annotation only and rendered the
+  one-replica Deployment regardless, which is a claim rather than a gate and is
+  why the selection moved. Because objects DO render, the stop before the
+  cluster is the operator's suspended reconciler rather than this value alone
+  (§6);
 - no storage activation (§4);
 - no public entry point of any kind (§3).
 
@@ -107,13 +123,20 @@ readiness probe forwards `/readyz` to the application, so the proxy cannot
 become Ready until the application answers; the application's ingress policy
 admits only Pods carrying both labels above, so the application answers nobody
 until the proxy exists. That is a deadlock only if the binding is applied after
-the proxy. It is applied BEFORE — in this change, while no proxy Pod exists at
-all. The policy is then already in place and already admits exactly the label
-pair; the operator applies the proxy into a namespace whose application-side
-rule is settled, its Pod matches on creation, its probe reaches the application
-over the one admitted edge, and readiness succeeds on the first attempt. No
-temporary widening is needed anywhere in that sequence, which is the point:
-the cycle is broken by ordering, not by an interim rule that admits more.
+the proxy. It is reviewed and reconciled BEFORE — the binding lands here while
+no proxy Pod exists at all, so the policy already admits exactly the label pair
+by the time the operator applies the proxy: its Pod matches on creation and its
+probe reaches the application over the one admitted edge. No temporary widening
+is needed anywhere in that sequence, which is the point: the cycle is broken by
+ordering, not by an interim rule that admits more.
+
+**Ordering removes the deadlock; it does not promise success.**
+Backend-dependent readiness is expected, not guaranteed on the first attempt —
+the application Pod must be scheduled, its volumes bound and its own `/readyz`
+answering before the proxy's probe can pass, and none of that is decided by
+source selection or label matching. The runbook's acceptance battery is what
+establishes readiness; this document does not, and neither does a green check
+in this repository.
 
 Until the operator applies the proxy, the binding admits a Pod set that is
 empty. That is the same fail-closed posture as the placeholder, reached by
@@ -227,8 +250,13 @@ provisioner behind them, which stay bootstrap and operator owned. The existing
 the decision is not unique to this workload.
 
 Until that decision and the host-side activation evidence both exist, this
-namespace's storage is a NO-GO regardless of what any budget says, and the
-`deploymentReady: false` value above is what holds the line.
+namespace's storage is a NO-GO regardless of what any budget says. What holds
+that line is NOT `deploymentReady: false` by itself: the selected chart renders
+both claims at either value, so an unsuspended reconciler would create them
+whatever this value says. The line is held by the operator's reconciler, created
+SUSPENDED and unsuspended only after the storage admission decision and the two
+PersistentVolumes exist; `deploymentReady: false` then keeps the Deployment at
+zero application replicas until a second reviewed change moves it.
 
 ## 5. The contract state this introduces, and why it is a security review
 
@@ -252,5 +280,35 @@ both directions:
 Promotion out of this state is ONE reviewed change that moves the entry between
 the two maps and adds its acquisition receipt record. It cannot be pre-opened to
 reserve a place, and this document does not authorize it.
+
+## 6. Sequence: what this merge is, and what follows it
+
+An earlier version of this document required the proxy binding to be applied
+before this change could leave Draft, while also saying that this change is what
+binds the proxy. Both cannot hold, and a reviewer said so. The boundary is:
+
+1. **Ready and the owner's merge of this change require source approval at the
+   exact head and green checks — nothing live.** This repository selects a
+   verified chart and states a policy; it cannot observe a cluster, and no
+   evidence from one is a precondition for reviewing what it says.
+2. **After the merge, the operator admits the source path** — the reviewed Git
+   source, which is a `platform` change of its own.
+3. **The operator creates the third tenant reconciler SUSPENDED.** Nothing here
+   reconciles until that suspension is lifted, which is what keeps a rendered
+   claim from being created before its volume exists.
+4. **The operator proves the prerequisites**: the `obsidian` namespace, the
+   `obsync-helm-reconciler` account and its RBAC, the storage admission decision
+   and the two PersistentVolumes, the `obsync-server-key` Secret, and
+   certificate custody — the leaf chain and key in `obsync-tls-leaf`, with the
+   issuing CA private key kept off-cluster.
+5. **`deploymentReady: true` is a SECOND one-line reviewed change in this
+   repository**, against prerequisites someone confirmed by running the checks.
+   It is never batched into a chart selection.
+6. **The operator lifts the reconciler's suspension.**
+7. **The proxy apply follows**, with the application Service resolvable and the
+   peer already bound.
+8. **Backend-dependent readiness is expected, not guaranteed on the first
+   attempt.** The runbook's acceptance battery is what proves it.
+9. **The private path is enabled last**, under its own authorization.
 
 - Fable5.1

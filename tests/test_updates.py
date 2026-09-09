@@ -1,5 +1,6 @@
 """Reject drift blind spots and exercise each proposal publication boundary."""
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -51,6 +52,45 @@ class UpdatesTests(unittest.TestCase):
         record["manifestDigest"] = "sha256:" + "8" * 64
         record["workloadImage"] = f"ghcr.io/snaraj/{slug}:v{target}@sha256:" + "9" * 64
         return target
+
+    def pending_application(self, slug="pending-fixture", template="obsync"):
+        """Declare a synthetic PENDING application, and prove it admissible.
+
+        The two rules below are pending-only, and activation emptied the map
+        they read. Skipping them would park the only tests that hold the
+        proposer off a pending path, so the subject is built here instead: an
+        active application's directory copied under a new slug, byte-pinned like
+        any other, with the sentinel digest and a suspended, not-ready release.
+        `check` runs before this returns, so the fixture is admissible and any
+        later refusal is the mutation under test.
+        """
+
+        validate = updates.validate
+        validate.PENDING_APPLICATIONS[slug] = slug
+        validate.NAMESPACES[slug] = validate.NAMESPACES[template]
+        self.addCleanup(validate.PENDING_APPLICATIONS.pop, slug, None)
+        self.addCleanup(validate.NAMESPACES.pop, slug, None)
+        target = self.root / "kubernetes/websites" / slug
+        target.mkdir()
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        shapes = json.loads(shapes_path.read_text())
+        for name in validate.FILES:
+            text = (self.root / "kubernetes/websites" / template / name).read_text()
+            text = text.replace(template, slug)
+            if name == "source.yaml":
+                text = validate.DIGEST_LINE.sub(
+                    "    digest: " + validate.SENTINEL_DIGEST, text)
+            if name == "release.yaml":
+                text = validate.SUSPEND_LINE.sub("  suspend: true", text)
+                text = validate.READY_LINE.sub("    deploymentReady: false", text)
+            (target / name).write_text(text)
+            normalized, _, _ = validate.normalized_manifest(
+                (target / name).read_bytes(), name == "source.yaml", True
+            )
+            shapes[f"kubernetes/websites/{slug}/{name}"] = hashlib.sha256(normalized).hexdigest()
+        shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+        validate.check(self.root)
+        return slug
 
     def plan(self, effect=None, run=None):
         if effect is None:
@@ -208,6 +248,7 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(environment["GH_TOKEN"], "synthetic")
 
     def test_real_git_diff_denies_a_nonselection_change_or_changed_planned_bytes(self):
+        self.pending_application()
         env = updates.publication.git_environment()
         def git(*args):
             return subprocess.run(["git", "-C", str(self.root), *args], check=True,
@@ -244,9 +285,9 @@ class UpdatesTests(unittest.TestCase):
         must still be checked, or this would pass by checking nothing.
         """
 
+        self.pending_application()
         pending = sorted(updates.validate.PENDING_APPLICATIONS)
-        if not pending:
-            self.skipTest("no application is pending; the rule stands unexercised")
+        self.assertTrue(pending)
         self.assertEqual(set(self.selections), set(updates.validate.APPLICATIONS))
         for slug in pending:
             self.assertNotIn(slug, self.selections)
@@ -279,8 +320,6 @@ class UpdatesTests(unittest.TestCase):
         # extra file. Declaring the pending path in `files` too makes the
         # changed-equals-planned check pass, so the only thing left standing
         # between the proposal and a pending application is `allowed` itself.
-        if not updates.validate.PENDING_APPLICATIONS:
-            self.skipTest("no application is pending; the rule stands unexercised")
         for slug in sorted(updates.validate.PENDING_APPLICATIONS):
             relative = f"kubernetes/websites/{slug}/source.yaml"
             path = self.root / relative
