@@ -273,6 +273,36 @@ class UpdatesTests(unittest.TestCase):
             updates.verify_delta(self.root, base, files)
 
 
+    def test_every_active_application_can_move_in_one_proposal(self):
+        """The delta bound follows the application set, not a constant (issue #13)."""
+        self.pending_application()
+        env = updates.publication.git_environment()
+        def git(*args):
+            return subprocess.run(["git", "-C", str(self.root), *args], check=True,
+                                  capture_output=True, env=env).stdout.decode().strip()
+        git("init", "-b", "main")
+        git("add", ".")
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture")
+        base = git("rev-parse", "HEAD")
+        for slug in updates.validate.APPLICATIONS:
+            self.advance(slug)
+        (files, _), _acquire = self.plan()
+        self.assertEqual(len(files), len(updates.validate.APPLICATIONS) + 1)
+        for relative, payload in files.items():
+            (self.root / relative).write_bytes(payload)
+        updates.verify_delta(self.root, base, files)
+        extra = self.root / "kubernetes/websites/naranjo-online/default-deny.yaml"
+        extra.write_text(extra.read_text() + "\n# extra\n")
+        with self.assertRaisesRegex(ValueError, "unexpected paths"):
+            updates.verify_delta(self.root, base, {**files, "kubernetes/websites/naranjo-online/default-deny.yaml": extra.read_bytes()})
+        git("restore", str(extra))
+        receipt_only = {updates.validate.RECEIPT.as_posix(): files[updates.validate.RECEIPT.as_posix()]}
+        for relative in files:
+            if relative != updates.validate.RECEIPT.as_posix():
+                git("restore", relative)
+        with self.assertRaisesRegex(ValueError, "unexpected paths"):
+            updates.verify_delta(self.root, base, receipt_only)
+
     # --- Pending applications never reach a proposal (issue #348) -----------
 
     def test_the_drift_check_and_plan_see_active_applications_only(self):
