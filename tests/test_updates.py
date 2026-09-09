@@ -1,5 +1,6 @@
 """Reject drift blind spots and exercise each proposal publication boundary."""
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -52,6 +53,45 @@ class UpdatesTests(unittest.TestCase):
         record["workloadImage"] = f"ghcr.io/snaraj/{slug}:v{target}@sha256:" + "9" * 64
         return target
 
+    def pending_application(self, slug="pending-fixture", template="obsync"):
+        """Declare a synthetic PENDING application, and prove it admissible.
+
+        The two rules below are pending-only, and activation emptied the map
+        they read. Skipping them would park the only tests that hold the
+        proposer off a pending path, so the subject is built here instead: an
+        active application's directory copied under a new slug, byte-pinned like
+        any other, with the sentinel digest and a suspended, not-ready release.
+        `check` runs before this returns, so the fixture is admissible and any
+        later refusal is the mutation under test.
+        """
+
+        validate = updates.validate
+        validate.PENDING_APPLICATIONS[slug] = slug
+        validate.NAMESPACES[slug] = validate.NAMESPACES[template]
+        self.addCleanup(validate.PENDING_APPLICATIONS.pop, slug, None)
+        self.addCleanup(validate.NAMESPACES.pop, slug, None)
+        target = self.root / "kubernetes/websites" / slug
+        target.mkdir()
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        shapes = json.loads(shapes_path.read_text())
+        for name in validate.FILES:
+            text = (self.root / "kubernetes/websites" / template / name).read_text()
+            text = text.replace(template, slug)
+            if name == "source.yaml":
+                text = validate.DIGEST_LINE.sub(
+                    "    digest: " + validate.SENTINEL_DIGEST, text)
+            if name == "release.yaml":
+                text = validate.SUSPEND_LINE.sub("  suspend: true", text)
+                text = validate.READY_LINE.sub("    deploymentReady: false", text)
+            (target / name).write_text(text)
+            normalized, _, _ = validate.normalized_manifest(
+                (target / name).read_bytes(), name == "source.yaml", True
+            )
+            shapes[f"kubernetes/websites/{slug}/{name}"] = hashlib.sha256(normalized).hexdigest()
+        shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+        validate.check(self.root)
+        return slug
+
     def plan(self, effect=None, run=None):
         if effect is None:
             effect = lambda selection, *_: (copy.deepcopy(self.records[selection.slug]), {})
@@ -60,10 +100,10 @@ class UpdatesTests(unittest.TestCase):
                                   run or Mock(return_value="Version: 1.3.4+Homebrew\n"))
         return result, acquire
 
-    def test_current_and_drift_cover_both_and_compare_versions_numerically(self):
+    def test_current_and_drift_cover_every_application_and_compare_numerically(self):
         current = updates.check_latest(self.root, self.github)
         self.assertEqual(current["status"], "CURRENT")
-        self.assertEqual(set(current["applications"]), {"naranjo-online", "lidersea-com"})
+        self.assertEqual(set(current["applications"]), set(updates.validate.APPLICATIONS))
         target = self.advance("lidersea-com")
         result = updates.check_latest(self.root, self.github)
         self.assertEqual(result["status"], "DRIFT")
@@ -94,10 +134,10 @@ class UpdatesTests(unittest.TestCase):
                     updates.latest(self.selections, self.github)
         self.releases[repo] = original
 
-    def test_current_plan_reacquires_both_and_writes_nothing(self):
+    def test_current_plan_reacquires_every_application_and_writes_nothing(self):
         (files, targets), acquire = self.plan()
         self.assertEqual(files, {})
-        self.assertEqual(acquire.call_count, 2)
+        self.assertEqual(acquire.call_count, len(updates.validate.APPLICATIONS))
         self.assertEqual(set(targets), set(self.selections))
 
     def test_new_plan_has_only_changed_selection_and_complete_valid_receipt(self):
@@ -105,7 +145,7 @@ class UpdatesTests(unittest.TestCase):
         before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
         (files, _targets), acquire = self.plan()
         self.assertEqual(set(files), {"kubernetes/websites/naranjo-online/source.yaml", str(updates.validate.RECEIPT)})
-        self.assertEqual(acquire.call_count, 2)
+        self.assertEqual(acquire.call_count, len(updates.validate.APPLICATIONS))
         self.assertEqual(before, {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
         for relative, payload in files.items():
             (self.root / relative).write_bytes(payload)
@@ -208,6 +248,7 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(environment["GH_TOKEN"], "synthetic")
 
     def test_real_git_diff_denies_a_nonselection_change_or_changed_planned_bytes(self):
+        self.pending_application()
         env = updates.publication.git_environment()
         def git(*args):
             return subprocess.run(["git", "-C", str(self.root), *args], check=True,
@@ -244,6 +285,7 @@ class UpdatesTests(unittest.TestCase):
         must still be checked, or this would pass by checking nothing.
         """
 
+        self.pending_application()
         pending = sorted(updates.validate.PENDING_APPLICATIONS)
         self.assertTrue(pending)
         self.assertEqual(set(self.selections), set(updates.validate.APPLICATIONS))
@@ -259,8 +301,17 @@ class UpdatesTests(unittest.TestCase):
             updates.latest(intruder, self.github)
 
     def test_a_proposal_cannot_write_a_pending_application_path(self):
-        """The allowed-path set is derived from ACTIVE applications only."""
+        """The allowed-path set is derived from ACTIVE applications only.
 
+        The pending subject is declared HERE, inside the test and before the
+        baseline commit, so the denial below has something to deny. At a head
+        whose pending map was empty this loop ran zero times and the test
+        passed by checking nothing — a vacuous pass a delta review caught —
+        and the count at the end is what refuses that shape from now on.
+        """
+
+        pending = self.pending_application()
+        self.assertIn(pending, updates.validate.PENDING_APPLICATIONS)
         env = updates.publication.git_environment()
         def git(*args):
             return subprocess.run(["git", "-C", str(self.root), *args], check=True,
@@ -278,7 +329,9 @@ class UpdatesTests(unittest.TestCase):
         # extra file. Declaring the pending path in `files` too makes the
         # changed-equals-planned check pass, so the only thing left standing
         # between the proposal and a pending application is `allowed` itself.
+        denied = []
         for slug in sorted(updates.validate.PENDING_APPLICATIONS):
+            denied.append(slug)
             relative = f"kubernetes/websites/{slug}/source.yaml"
             path = self.root / relative
             original = path.read_bytes()
@@ -293,6 +346,7 @@ class UpdatesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unexpected paths"):
                 updates.verify_delta(self.root, base, files)
             path.write_bytes(original)
+        self.assertEqual(denied, [pending], "the denial ran against the declared pending subject")
 
     def test_the_publication_surface_admits_no_undeclared_application(self):
         """A fourth directory is refused by the publication gate as well.
@@ -369,7 +423,13 @@ class ProposalFlowTests(unittest.TestCase):
                     calls["latest"] += 1
                     repo = path.split("/releases/")[0][6:]
                     release = copy.deepcopy(self.releases[repo])
-                    if fault == "latest-before-sign" and calls["latest"] >= 5:
+                    # Keyed on the PHASE, not a call ordinal: the ordinal was
+                    # tuned for two applications and moved the moment a third
+                    # was promoted, firing the drift before the gate instead of
+                    # between the gate and the signature. `verify` in `steps`
+                    # means the gate has run, so the next read of the release is
+                    # the one that must see the source move under it.
+                    if fault == "latest-before-sign" and "verify" in steps:
                         release["id"] += 100
                     return json.dumps(release)
                 if path.endswith("pulls?state=open&per_page=100"):

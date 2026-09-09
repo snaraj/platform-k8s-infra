@@ -23,7 +23,7 @@ PATHS = re.compile(r"(?:scripts/[a-z0-9_/-]+\.(?:py|sh)|tests/test_[a-z0-9_]+\.p
                    r"\.github/workflows/[a-z0-9_-]+\.yml|\.github/CODEOWNERS|\.github/dependabot\.yml|\.githooks/pre-push|"
                    # Exact directory alternation, never a wildcard: the publication
                    # surface is the last place a new path should be admitted by
-                   # pattern. `obsync` is the pending third application; a fourth
+                   # pattern. `obsync` is the third ACTIVE application; a fourth
                    # directory is refused here as well as by the composition
                    # inventory, so neither gate alone is load-bearing.
                    r"kubernetes/websites/(?:naranjo-online|lidersea-com|obsync)/[a-z-]+\.yaml)")

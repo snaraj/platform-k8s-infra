@@ -18,7 +18,8 @@ spec.loader.exec_module(artifacts)
 # ACTIVE applications: slug -> application repository. Each one has a published
 # release, an acquired artifact and an exact record in the acquisition receipt,
 # and the receipt is required to bind EXACTLY this set.
-APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.online"}
+APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.online",
+                "obsync": "obsync"}
 
 # PENDING applications: the same shape, for a workload whose publisher has not
 # cut a release yet. This is a second, NARROWER declaration rather than a third
@@ -43,7 +44,10 @@ APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.onlin
 # APPLICATIONS and adds its acquisition receipt record. The two rules above are
 # opposites, so that change cannot half-land: leaving the sentinel while active
 # fails, and committing a real digest while pending fails.
-PENDING_APPLICATIONS = {"obsync": "obsync"}
+# Empty because obsync was promoted, NOT because the state was retired. The
+# rules below are still enforced and their tests still stand; the next
+# application whose publisher has not cut a release enters here.
+PENDING_APPLICATIONS = {}
 
 FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml")
 # The namespace each application composes into. `obsync` is the one slug whose

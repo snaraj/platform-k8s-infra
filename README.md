@@ -20,14 +20,21 @@ and verified against each application's exact publisher identity.
 
 Application manifests live in `kubernetes/websites/`. Each application has an
 OCI chart source, a Helm release and a default-deny network policy. The active
-applications are naranjo.online and lidersea.com. Their selected source, chart
-and image bindings are recorded in the [acquisition receipt](docs/assurance/195-chart-acquisition-receipt.json).
+applications are naranjo.online, lidersea.com and obsync. Their selected source,
+chart and image bindings are recorded in the [acquisition receipt](docs/assurance/195-chart-acquisition-receipt.json).
 
-`obsync` is composed but **pending**: its publisher has cut no release, so its
-selection is the fail-closed sentinel digest, its release is suspended and not
-ready, and it holds no receipt record. It deploys nothing, and the validator
-requires exactly that state until one reviewed change promotes it. The decision
-admitting it is [docs/decisions/2026-09-07-obsync-workload.md](docs/decisions/2026-09-07-obsync-workload.md).
+`obsync` was composed pending and activated by this change: its publisher cut
+v0.1.4, so the fail-closed sentinel is replaced by the acquired digest, the
+release is unsuspended, and it holds a receipt record like any other active
+application. Its `deploymentReady` value stays `false` — that one describes the
+cluster, not this repository, and selecting a verified chart does not move it.
+At `false` the selected chart still renders its object set and holds the
+Deployment at zero application replicas; the operator's reconciler, created
+suspended, is what keeps any of it from reaching the cluster.
+`PENDING_APPLICATIONS` is now empty — the state is unused, not retired, and the
+next application whose publisher has not cut a release enters it. The decision
+admitting obsync is
+[docs/decisions/2026-09-07-obsync-workload.md](docs/decisions/2026-09-07-obsync-workload.md).
 
 The verifier checks the allowed manifest boundary and independently reproduces
 the acquisition receipt from public artifacts. Verification covers chart and

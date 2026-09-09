@@ -6,14 +6,13 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: fluxcd
   annotations:
-    platform.snaraj.dev/readiness: suspended-until-obsync-chart-release
+    platform.snaraj.dev/readiness: active-via-signature-verified-chart
 spec:
-  # Suspended, and `scripts/validate.py` requires exactly that for a pending
-  # application. The OCIRepository beside this file carries the all-zero
-  # sentinel digest, so there is nothing for helm-controller to install and an
-  # unsuspended release would only produce a permanent reconciliation error.
-  # Resuming it is part of the same reviewed change that replaces the sentinel.
-  suspend: true
+  # Unsuspended by the promotion that replaced the sentinel with the acquired
+  # digest. The two are one change on purpose: `scripts/validate.py` refuses an
+  # unsuspended pending release and refuses a sentinel selection for an active
+  # application, so neither half can land without the other.
+  suspend: false
   # The same one-minute ceiling the two active applications carry: a poll of
   # already-verified state, no webhook receiver, no inbound path, no new object.
   interval: 1m0s
@@ -31,18 +30,20 @@ spec:
   # `snaraj/platform`, which owns namespaces, RBAC and reconciliation
   # definitions; the change that adds its ServiceAccount, Role and RoleBinding —
   # creation unnamed, every follow-up mutation pinned by `resourceNames` to the
-  # chart's rendered names, and no namespace-wide claim rule — is in flight
-  # there. Until it merges this name resolves to nothing, which is one more
-  # reason this release is suspended and not ready.
+  # chart's rendered names, and no namespace-wide claim rule — has merged there.
+  # A merge in that repository is not proof the cluster holds the object, and
+  # this repository cannot check: until the account exists in `obsidian` this
+  # name resolves to nothing and helm-controller cannot act.
   serviceAccountName: obsync-helm-reconciler
   driftDetection:
     mode: enabled
   # The chart artifact comes from the signature-verified OCIRepository beside
-  # this file. While that object carries the sentinel digest, source-controller
-  # produces no artifact and this release installs nothing — the fail-closed
-  # state this onboarding deliberately commits. chartRef carries no namespace,
-  # so helm-controller (started with --no-cross-namespace-refs=true) can only
-  # resolve it inside this application's own namespace.
+  # this file, which now names a real digest — so source-controller produces an
+  # artifact only if cosign verifies it against the publisher identity that
+  # object anchors, and a chart the signature does not cover reaches nothing.
+  # chartRef carries no namespace, so helm-controller (started with
+  # --no-cross-namespace-refs=true) can only resolve it inside this
+  # application's own namespace.
   chartRef:
     kind: OCIRepository
     name: obsync-chart
@@ -63,10 +64,35 @@ spec:
   # what matters: no image repository, tag or digest. The signed chart remains
   # the sole workload image-identity carrier.
   values:
-    # The reviewed activation gate. It stays false until the namespace, the two
-    # PersistentVolumes and the server-key Secret all exist on the cluster and
-    # the chart selection above names a real digest; flipping it is a separate
-    # reviewed change, not a side effect of this onboarding.
+    # The reviewed activation gate, and the one value here that describes the
+    # CLUSTER rather than this repository — which is why selecting a verified
+    # chart does not move it. It stays false until the `obsidian` namespace, the
+    # `obsync-blobs` and `obsync-journal` PersistentVolumes and the
+    # `obsync-server-key` Secret all exist, and none of that is confirmed: the
+    # cluster's storage-admission and bootstrap-prerequisite gates are still
+    # unsatisfied.
+    #
+    # What `false` MEANS in the selected chart, stated exactly, because the
+    # predecessor of this comment overstated it. In obsync v0.1.4 this value
+    # gates the rendered Deployment's `spec.replicas` — 0 when false, 1 when
+    # true — and gates nothing else: the SAME six objects render at either value
+    # (ServiceAccount, Service, NetworkPolicy, both PersistentVolumeClaims and
+    # the Deployment), and the `platform.snaraj.dev/deployment-ready` annotation
+    # is still carried. Nothing is omitted at `false`; a non-boolean value is
+    # refused by the chart's closed schema, and the chart's own render pins
+    # (`scripts/ci/chart_pins.py readiness`) hold both shapes. The claims render
+    # at `false` deliberately, so they bind their pre-provisioned volumes before
+    # any Pod exists, and the Service renders so the TLS proxy can resolve it.
+    #
+    # Two consequences. Objects DO render, so the stop before the cluster is the
+    # operator's reconciler — created SUSPENDED, unsuspended only after the
+    # prerequisites above are proven — and not this value alone. And v0.1.3
+    # carried this value into the `platform.snaraj.dev/deployment-ready`
+    # annotation only, rendering the one-replica Deployment regardless: that
+    # was a claim rather than a gate, which is why the selection moved to
+    # v0.1.4. Flipping this to `true` is its own reviewed one-line change
+    # against prerequisites the operator proved, never a side effect of
+    # selecting a chart.
     deploymentReady: false
     # `none`, NOT `cloudflare`, and the wrong value here fails closed but
     # totally. `cloudflare` makes the server REQUIRE the edge's
@@ -82,17 +108,19 @@ spec:
     # connector straight to that cleartext listener. The reviewed design admits
     # only connector -> proxy (TLS) and proxy -> application (HTTP).
     #
-    # PENDING IDENTITY. The proxy is a separate platform workload — not a
-    # sidecar — whose exact labels arrive with the security lane's own reviewed
-    # deployment change and replace these two values in that same change. No
-    # Pod in this cluster carries them today, so the rendered ingress policy
-    # admits nothing and this release stays non-deployable. That is the correct
-    # interim state: an absent matching proxy is a route that does not work,
-    # whereas naming the connector "temporarily" would be a route that works
-    # and should not.
+    # REAL IDENTITY, replacing the `-pending` placeholder this composition was
+    # onboarded with. The proxy is a separate platform workload — not a sidecar
+    # — and `snaraj/platform` has now reviewed and merged its Deployment, whose
+    # Pod template carries `app.kubernetes.io/name: obsync-tls-proxy` and
+    # `app.kubernetes.io/instance: obsync-tls-proxy` in this namespace. These
+    # two values are that pair, so the rendered ingress policy admits exactly
+    # those Pods and nothing else. The placeholder was correct while no such
+    # Pod could exist and is retired here rather than carried into activation:
+    # a name no Pod will ever carry stops being a fail-closed statement once
+    # the real one is reviewed and knowable.
     ingress:
       peerAppName: obsync-tls-proxy
-      peerInstance: obsync-tls-proxy-pending
+      peerInstance: obsync-tls-proxy
       peerNamespace: obsidian
     # Empty, not a sentinel hostname. The chart's closed schema admits the
     # empty string and the application treats an unset public URL as unset —
