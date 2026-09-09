@@ -10,13 +10,20 @@
 # the slug was pending. The two rules are opposites, so the promotion could not
 # half-land: the digest and the map entry had to arrive together.
 #
-# The digest was resolved from `ghcr.io/snaraj/charts/obsync:0.1.3` only AFTER
+# The digest was resolved from `ghcr.io/snaraj/charts/obsync:0.1.4` only AFTER
 # cosign verified that artifact against the publisher identity the `verify`
 # block at the foot of this file names, and the tag was then re-verified in
-# digest form so the signature and this selection bind the same bytes. The
-# selection is the newest tag that is also a COMPLETE Release: `v0.1.2` exists
-# as a Git tag with an attested image, but the publisher pushed no chart for it
-# and cut no Release, so there is nothing at `charts/obsync:0.1.2` to select.
+# digest form so the signature and this selection bind the same bytes.
+#
+# Why 0.1.4 and not an older tag. `v0.1.4` is the release in which
+# `deploymentReady` GATES the rendered Deployment's `spec.replicas` — 0 when
+# false, 1 when true — instead of only reaching an annotation. `v0.1.3` is a
+# complete Release and verifies, but its value was annotation-only and its
+# render carried a one-replica Deployment either way, which is a claim rather
+# than a gate; a reviewer found that and the publisher was fixed rather than the
+# claim reworded. `v0.1.2` exists as a Git tag with an attested image, but the
+# publisher pushed no chart for it and cut no Release, so there is nothing at
+# `charts/obsync:0.1.2` to select at all.
 #
 # Every fail-closed property the two active sources carry is already true here
 # and none may be relaxed without a reviewed decision:
@@ -46,7 +53,7 @@ apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   annotations:
-    platform.snaraj.dev/chart-release: "0.1.3"
+    platform.snaraj.dev/chart-release: "0.1.4"
   name: obsync-chart
   namespace: obsidian
 spec:
@@ -55,7 +62,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    digest: sha256:9144c1aba139211d0ea8b04b7d7f87531901cec9c32135e9822c815d36da3182
+    digest: sha256:aba8ba19fdb707ced2683f7410e52b2f6518cda918bd476bc06c3e15ee17e3f2
   timeout: 60s
   url: oci://ghcr.io/snaraj/charts/obsync
   verify:

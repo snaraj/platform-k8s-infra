@@ -32,19 +32,19 @@ Still not admitted, and each is a separate later decision:
 
 - no running workload: `deploymentReady: false` — the value that describes the
   CLUSTER — is unchanged, so the selected chart renders its Deployment with ZERO
-  application replicas. It does not omit objects, and an earlier version of this
-  document said it did. obsync v0.1.4 renders the same set at either value —
-  ServiceAccount, Service, NetworkPolicy, both PersistentVolumeClaims and the
-  Deployment — while `true` scales that Deployment to its one replica and
-  changes nothing else; a non-boolean value is refused by the chart's closed
-  schema. The claims render at `false` deliberately, so they bind their
-  pre-provisioned volumes before any Pod exists, and the Service renders so the
-  TLS proxy can resolve it. v0.1.3 carried the value into the
-  `platform.snaraj.dev/deployment-ready` annotation only and rendered the
-  one-replica Deployment regardless, which is a claim rather than a gate and is
-  why the selection moved. Because objects DO render, the stop before the
-  cluster is the operator's suspended reconciler rather than this value alone
-  (§6);
+  replicas. It does not omit objects, and an earlier version of this document
+  said it did. In obsync v0.1.4 the value gates the rendered Deployment's
+  `spec.replicas` — 0 when false, 1 when true — and gates nothing else: the same
+  six objects render at either value (ServiceAccount, Service, NetworkPolicy,
+  both PersistentVolumeClaims and the Deployment), the
+  `platform.snaraj.dev/deployment-ready` annotation is still carried, and a
+  non-boolean value is refused by the chart's closed schema. The claims render
+  at `false` deliberately, so they bind their pre-provisioned volumes before any
+  Pod exists, and the Service renders so the TLS proxy can resolve it. v0.1.3
+  carried the value into that annotation only and rendered the one-replica
+  Deployment regardless, which is a claim rather than a gate and is why the
+  selection moved. Because objects DO render, the stop before the cluster is the
+  operator's suspended reconciler rather than this value alone (§6);
 - no storage activation (§4);
 - no public entry point of any kind (§3).
 
@@ -205,8 +205,8 @@ divide the way the word "lock" suggests. Stated as it is:
    posture accepted a group-writable parent, so a process merely sharing a gid
    could perform the same rename. The repair — group write refused regardless of
    gid, canonical-path refusal, no `fsGroup` — was reviewed on that repository
-   and is present in the source this activation selects, `88a21bde` (the
-   `source_sha` the v0.1.3 release manifest states): its chart template sets no
+   and is present in the source this activation selects, `de174ab9` (the
+   `source_sha` the v0.1.4 release manifest states): its chart template sets no
    `fsGroup` and its storage posture refuses a group-writable volume rather than
    sharing a gid with it. The cite is the RELEASED source rather than the review
    branch head deliberately — a reviewed branch head that is not an ancestor of

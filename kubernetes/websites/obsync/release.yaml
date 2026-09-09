@@ -73,13 +73,15 @@ spec:
     # unsatisfied.
     #
     # What `false` MEANS in the selected chart, stated exactly, because the
-    # predecessor of this comment overstated it. obsync v0.1.4 renders the SAME
-    # object set at either value — ServiceAccount, Service, NetworkPolicy, both
-    # PersistentVolumeClaims and the Deployment — and `false` sets ZERO
-    # application replicas rather than omitting anything. `true` scales that
-    # Deployment to its one replica and changes nothing else; a non-boolean
-    # value is refused by the chart's closed schema. The claims render at
-    # `false` deliberately, so they bind their pre-provisioned volumes before
+    # predecessor of this comment overstated it. In obsync v0.1.4 this value
+    # gates the rendered Deployment's `spec.replicas` — 0 when false, 1 when
+    # true — and gates nothing else: the SAME six objects render at either value
+    # (ServiceAccount, Service, NetworkPolicy, both PersistentVolumeClaims and
+    # the Deployment), and the `platform.snaraj.dev/deployment-ready` annotation
+    # is still carried. Nothing is omitted at `false`; a non-boolean value is
+    # refused by the chart's closed schema, and the chart's own render pins
+    # (`scripts/ci/chart_pins.py readiness`) hold both shapes. The claims render
+    # at `false` deliberately, so they bind their pre-provisioned volumes before
     # any Pod exists, and the Service renders so the TLS proxy can resolve it.
     #
     # Two consequences. Objects DO render, so the stop before the cluster is the

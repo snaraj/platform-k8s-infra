@@ -24,7 +24,7 @@ applications are naranjo.online, lidersea.com and obsync. Their selected source,
 chart and image bindings are recorded in the [acquisition receipt](docs/assurance/195-chart-acquisition-receipt.json).
 
 `obsync` was composed pending and activated by this change: its publisher cut
-v0.1.3, so the fail-closed sentinel is replaced by the acquired digest, the
+v0.1.4, so the fail-closed sentinel is replaced by the acquired digest, the
 release is unsuspended, and it holds a receipt record like any other active
 application. Its `deploymentReady` value stays `false` — that one describes the
 cluster, not this repository, and selecting a verified chart does not move it.
