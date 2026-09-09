@@ -181,7 +181,12 @@ def signing_key(run=command):
 def verify_delta(root, base, files):
     changed = set(git(root, "diff", "--name-only", base).splitlines())
     allowed = {validate.RECEIPT.as_posix(), *(f"kubernetes/websites/{slug}/source.yaml" for slug in validate.APPLICATIONS)}
-    require(changed == set(files) and changed <= allowed and len(changed) in (2, 3), "proposal changes unexpected paths")
+    # The receipt plus one to every active application: the bound follows the
+    # application set, never a constant. A constant (2, 3) was the two-application
+    # shape this helper was written for, and it refused the first proposal that
+    # moved all three active applications at once (issue #13).
+    require(changed == set(files) and changed <= allowed
+            and 2 <= len(changed) <= len(validate.APPLICATIONS) + 1, "proposal changes unexpected paths")
     for relative, payload in files.items():
         require(validate.read_file(root, Path(relative)) == payload, "proposal bytes changed")
     validate.check(root)
