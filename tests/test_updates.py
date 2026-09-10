@@ -527,6 +527,7 @@ class ProposalFlowTests(unittest.TestCase):
                     updates.propose(destination, self.root, run)
             else:
                 result = updates.propose(destination, self.root, run)
+                self.published_body = published["body"]
                 self.assertEqual(result["status"], "DRAFT")
                 self.assertEqual(result["head"], published["headRefOid"])
                 self.assertEqual(result["base"], base)
@@ -599,6 +600,15 @@ class ProposalFlowTests(unittest.TestCase):
     def test_real_signed_candidate_reaches_only_draft_after_every_gate(self):
         steps = self.exercise()
         self.assertEqual(steps, ["worktree", "check", "verify", "commit", "signature", "publication", "push", "draft", "readback"])
+
+    def test_the_generated_body_names_the_declared_set_not_a_count(self):
+        """The first line no longer hard-codes "both": three applications are declared (issue #17)."""
+        self.exercise()
+        lines = self.published_body.splitlines()
+        self.assertEqual(lines[0], "Update the declared application selections from independently acquired immutable releases.")
+        self.assertNotIn("both", self.published_body)
+        self.assertEqual([line.split(":")[0] for line in lines if line.startswith("- ")],
+                         [f"- {slug}" for slug in sorted(updates.validate.APPLICATIONS)])
 
     def test_gate_failure_stops_before_signing(self):
         self.assertNotIn("commit", self.exercise("verify"))

@@ -283,7 +283,7 @@ def prepare_and_publish(destination: Path, root, run):
         remote_commit = github.api(f"repos/{REPOSITORY}/commits/{head}")
         require(remote_commit.get("sha") == head and remote_commit.get("commit", {}).get("verification", {}).get("verified") is True,
                 "published commit signature is not verified")
-        body = (f"Update both declared application selections from independently acquired immutable releases.\n\n"
+        body = (f"Update the declared application selections from independently acquired immutable releases.\n\n"
                 f"Base: `{base}`\nHead: `{head}`\n\n" +
                 "\n".join(f"- {slug}: `{target['version']}` (Release `{target['releaseId']}`)" for slug, target in sorted(targets.items())) +
                 "\n\nValidation: composition and tests, fresh artifact verification, signed commit and complete outgoing-history privacy/secret checks passed.\n\n"
