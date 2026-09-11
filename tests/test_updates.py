@@ -27,11 +27,17 @@ class UpdatesTests(unittest.TestCase):
             shutil.copytree(ROOT / relative, self.root / relative)
         self.selections, self.receipt = updates.validate.check(self.root)
         self.releases = {}
+        # Spelled by the publisher's own rule for whichever selection the tree
+        # carries, never by a literal prefix: the proposer runs this suite
+        # inside its candidate AFTER writing the new selections, so a suite
+        # that assumed the committed obsync selection (0.1.10, the last `v`
+        # tag) failed every proposal that moved it (issue #25).
         for n, (slug, selection) in enumerate(self.selections.items(), 1):
+            tag = updates.artifacts.github_release_tag(selection.source_repository, selection.version)
             self.releases[selection.source_repository] = {
-                "tag_name": f"v{selection.version}", "id": n, "immutable": True,
+                "tag_name": tag, "id": n, "immutable": True,
                 "draft": False, "prerelease": False,
-                "html_url": f"https://github.com/{selection.source_repository}/releases/tag/v{selection.version}"}
+                "html_url": f"https://github.com/{selection.source_repository}/releases/tag/{tag}"}
         self.github = Mock()
         self.github.api.side_effect = lambda path: copy.deepcopy(self.releases[path.split("/releases/")[0][6:]])
         self.cosign = Mock()
@@ -44,7 +50,7 @@ class UpdatesTests(unittest.TestCase):
         parts[2] += 1
         target = ".".join(map(str, parts))
         release = self.releases[selection.source_repository]
-        tag = target if slug == "obsync" and tuple(parts) > (0, 1, 10) else f"v{target}"
+        tag = updates.artifacts.github_release_tag(selection.source_repository, target)
         release["tag_name"] = tag
         release["html_url"] = f"https://github.com/{selection.source_repository}/releases/tag/{tag}"
         record = self.records[slug]
@@ -144,8 +150,23 @@ class UpdatesTests(unittest.TestCase):
 
     def test_obsync_latest_tag_spelling_is_closed_at_the_native_release_boundary(self):
         repo = "snaraj/obsync"
-        for version, tag in (("0.1.10", "v0.1.10"), ("0.1.11", "0.1.11"),
-                             ("0.2.0", "0.2.0"), ("1.0.0", "1.0.0")):
+        spell = updates.artifacts.github_release_tag
+        # The boundary itself, pinned on the pure rule so it holds whatever
+        # selection the tree carries: the last legacy tag wears the prefix,
+        # the first native release and everything after it is bare.
+        self.assertEqual([spell(repo, v) for v in ("0.1.9", "0.1.10", "0.1.11", "0.2.0", "1.0.0")],
+                         ["v0.1.9", "v0.1.10", "0.1.11", "0.2.0", "1.0.0"])
+        self.assertEqual(spell("snaraj/naranjo.online", "0.1.11"), "v0.1.11")
+        # And latest() closes on it: only versions at or past the SELECTED one
+        # are exercised here, because a latest release below the selection is
+        # refused as a regression before its spelling is ever read — and the
+        # proposer runs this suite inside a candidate whose selection has
+        # already moved (issue #25).
+        selected = updates.version(self.selections["obsync"].version)
+        table = [(v, spell(repo, v)) for v in ("0.1.10", "0.1.11", "0.2.0", "1.0.0")
+                 if updates.version(v) >= selected]
+        self.assertGreaterEqual(len(table), 2, "the table must reach past the selection")
+        for version, tag in table:
             for valid in (True, False):
                 candidate = tag if valid else (tag[1:] if tag.startswith("v") else "v" + tag)
                 self.releases[repo].update(tag_name=candidate,
