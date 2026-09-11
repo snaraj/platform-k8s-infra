@@ -29,17 +29,17 @@
       "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.82@sha256:21e03ae802fdba8bf55bb97b77497e41dc45ee99144817bf08d02aec39d8d60f"
     },
     "obsync": {
-      "arm64Digest": "sha256:5642dc15fe395ac536e0530a99fd2c383424b70c4ec45cab308fcaf9372cab6a",
-      "chart": {"appVersion": "0.1.11", "name": "obsync", "version": "0.1.11"},
-      "chartConfigDigest": "sha256:40188c41cddb3fda9231f884254703b4c196fe4d140f3f1858f07602f50bc29d",
-      "chartLayerDigest": "sha256:bcd91de471e131728bf5f40db64cb2a64880d6877f9b336b06d527b57f337016",
+      "arm64Digest": "sha256:737136f1e9d508459b7b0a43349748bc29936f24af5f016699aa8bed12cf1312",
+      "chart": {"appVersion": "0.1.12", "name": "obsync", "version": "0.1.12"},
+      "chartConfigDigest": "sha256:78d086ad5a1b1e81258143db6e809cee6c97aaa2c925008ddc8b16630cf50e96",
+      "chartLayerDigest": "sha256:f31d9ea2a37e74f20a66072a786e3832d68991b48a10a3d7cb317523dfa5626d",
       "chartRepository": "ghcr.io/snaraj/charts/obsync",
-      "chartTag": "0.1.11",
-      "manifestDigest": "sha256:5735b2dca4afa4f49bd4c77855cc56cd21fbe7432671f7b45ddf339d882b711a",
+      "chartTag": "0.1.12",
+      "manifestDigest": "sha256:a456aef0b0f7b3523fe0b2506ffcde9d543c5ed981f2160772c86b60541063f4",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:f080e5e16a6fc9538ab5424b82e07081daa7a075286c3de413c6e56397d533f9", "sourceSha": "8baec28a5d144dd34258aef261c4f165af279518"},
+      "release": {"assetDigest": "sha256:6ed5664744f4d3c4b5897c2863153877d49814c9f276e96842d3abed03d36cd1", "sourceSha": "ae1f3727cd238396381a80f96725480543957fb3"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/obsync/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/obsync:v0.1.11@sha256:84dae6c9fa7325b2d02bd12ee39bf56a96e90a32e5a32085b255c36bcddada9d"
+      "workloadImage": "ghcr.io/snaraj/obsync:v0.1.12@sha256:e32f6e9014f5c2780784fda0fe2c02f5a1d6b982b2b6f0da6688a75a5fc5c7fd"
     }
   },
   "schema": "dev.snaraj.chart-acquisition-receipt/v2",
