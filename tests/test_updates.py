@@ -17,6 +17,20 @@ updates = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updates)
 
 
+def release_fixtures(selections):
+    """Model the public tag contract independently of the selector under test."""
+    releases = {}
+    for number, selection in enumerate(selections.values(), 1):
+        native = (selection.source_repository == "snaraj/obsync" and
+                  tuple(map(int, selection.version.split("."))) >= (0, 1, 11))
+        tag = selection.version if native else "v" + selection.version
+        releases[selection.source_repository] = {
+            "tag_name": tag, "id": number, "immutable": True,
+            "draft": False, "prerelease": False,
+            "html_url": f"https://github.com/{selection.source_repository}/releases/tag/{tag}"}
+    return releases
+
+
 class UpdatesTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -26,12 +40,7 @@ class UpdatesTests(unittest.TestCase):
         for relative in ("kubernetes", "policies", "docs/assurance"):
             shutil.copytree(ROOT / relative, self.root / relative)
         self.selections, self.receipt = updates.validate.check(self.root)
-        self.releases = {}
-        for n, (slug, selection) in enumerate(self.selections.items(), 1):
-            self.releases[selection.source_repository] = {
-                "tag_name": f"v{selection.version}", "id": n, "immutable": True,
-                "draft": False, "prerelease": False,
-                "html_url": f"https://github.com/{selection.source_repository}/releases/tag/v{selection.version}"}
+        self.releases = release_fixtures(self.selections)
         self.github = Mock()
         self.github.api.side_effect = lambda path: copy.deepcopy(self.releases[path.split("/releases/")[0][6:]])
         self.cosign = Mock()
@@ -144,6 +153,10 @@ class UpdatesTests(unittest.TestCase):
 
     def test_obsync_latest_tag_spelling_is_closed_at_the_native_release_boundary(self):
         repo = "snaraj/obsync"
+        # This is a format test, so its old-version case must not depend on
+        # the deployment selection or trip the separate downgrade guard.
+        selections = copy.deepcopy(self.selections)
+        selections["obsync"].version = "0.1.10"
         for version, tag in (("0.1.10", "v0.1.10"), ("0.1.11", "0.1.11"),
                              ("0.2.0", "0.2.0"), ("1.0.0", "1.0.0")):
             for valid in (True, False):
@@ -152,10 +165,25 @@ class UpdatesTests(unittest.TestCase):
                     html_url=f"https://github.com/{repo}/releases/tag/{candidate}")
                 with self.subTest(version=version, tag=candidate):
                     if valid:
-                        self.assertEqual(updates.latest(self.selections, self.github)["obsync"]["version"], version)
+                        self.assertEqual(updates.latest(selections, self.github)["obsync"]["version"], version)
                     else:
                         with self.assertRaisesRegex(ValueError, "versioned format"):
-                            updates.latest(self.selections, self.github)
+                            updates.latest(selections, self.github)
+
+    def test_initial_release_fixtures_accept_legacy_native_and_future_selections(self):
+        repo = "snaraj/obsync"
+        for version, tag in (("0.1.10", "v0.1.10"), ("0.1.11", "0.1.11"),
+                             ("0.1.12", "0.1.12"), ("0.2.0", "0.2.0"), ("1.0.0", "1.0.0")):
+            with self.subTest(version=version):
+                selections = copy.deepcopy(self.selections)
+                selections["obsync"].version = version
+                self.releases = release_fixtures(selections)
+                self.assertEqual(self.releases[repo]["tag_name"], tag)
+                self.assertEqual(self.releases[repo]["html_url"], f"https://github.com/{repo}/releases/tag/{tag}")
+                self.assertEqual(updates.latest(selections, self.github)["obsync"]["version"], version)
+                for slug in ("lidersea-com", "naranjo-online"):
+                    selected = selections[slug]
+                    self.assertEqual(self.releases[selected.source_repository]["tag_name"], "v" + selected.version)
 
     def test_new_plan_has_only_changed_selection_and_complete_valid_receipt(self):
         self.advance("naranjo-online")
