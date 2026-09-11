@@ -147,16 +147,18 @@ spec:
     # `size` is what the claim requests AND what the server is told through
     # OBSYNC_*_CAPACITY — the claim guarantee is the only number that cannot
     # overstate what the pod may write. `capacity` records what the operator
-    # provisioned on the volume the claim binds to, so a 250Gi -> 500Gi growth
-    # is one values edit stating both facts.
+    # provisioned on the volume the claim binds to. The reserved-file profile
+    # is static and does not expand or migrate an existing bound claim through
+    # a values edit. Platform qualification and separate readiness review are
+    # required; the outer reconciler must stay suspended until then.
     storage:
       blobs:
         capacity: 250Gi
-        className: local-pie-ssd
+        className: local-pie-ssd-reserved
         size: 250Gi
       journal:
         capacity: 4Gi
-        className: local-pie-ssd
+        className: local-pie-ssd-reserved
         size: 4Gi
     # Empty is the STRICT setting, not the lazy one: in `none` edge mode the
     # server believes a forwarded address only from a listed range, so an empty

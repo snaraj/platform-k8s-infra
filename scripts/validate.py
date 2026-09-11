@@ -522,6 +522,36 @@ def storage_activation_errors(payload: bytes) -> None:
         raise ValueError("application composition must not activate storage")
 
 
+def obsync_storage_profile_errors(spec_lines: list[tuple[int, str]]) -> None:
+    """Hold the reviewed staging boundary independently of a regenerated pin.
+
+    Readiness graduation must explicitly review this guard with its new
+    evidence; selecting a class or rehashing values cannot qualify a host.
+    """
+    values = values_body(spec_lines)
+    keys = bare_keys(values, 4, "obsync values")
+    if keys.get("deploymentReady", (0, ""))[1] != "false":
+        raise ValueError("obsync reserved-file storage must remain not ready")
+    if "storage" not in keys or keys["storage"][1]:
+        raise ValueError("obsync storage must match the staged reserved-file profile")
+    storage = block_body(values, keys["storage"][0], 4)
+    roles = bare_keys(storage, 6, "obsync storage")
+    if set(roles) != {"blobs", "journal"}:
+        raise ValueError("obsync storage must match the staged reserved-file profile")
+    for role, size in (("blobs", "250Gi"), ("journal", "4Gi")):
+        opener, scalar = roles[role]
+        if scalar:
+            raise ValueError("obsync storage must match the staged reserved-file profile")
+        role_body = block_body(storage, opener, 6)
+        if any(len(raw) - len(raw.lstrip(" ")) != 8 for _, raw in role_body
+               if raw.strip() and not raw.lstrip().startswith("#")):
+            raise ValueError("obsync storage must match the staged reserved-file profile")
+        fields = bare_keys(role_body, 8, "obsync storage role")
+        actual = {key: rest for key, (_, rest) in fields.items()}
+        if actual != {"capacity": size, "className": "local-pie-ssd-reserved", "size": size}:
+            raise ValueError("obsync storage must match the staged reserved-file profile")
+
+
 def check(root: Path = ROOT) -> tuple[dict, dict]:
     """Validate inventory, all fixed manifest fields and receipt bindings."""
     shapes = json.loads(read_file(root, Path("policies/manifest-shapes.json")), object_pairs_hook=unique_object)
@@ -549,6 +579,8 @@ def check(root: Path = ROOT) -> tuple[dict, dict]:
         spec_lines = manifest_envelope(payload, path.name, slug, inventory[slug])
         if path.name == "release.yaml":
             single_writer_errors(payload, spec_lines)
+            if slug == "obsync":
+                obsync_storage_profile_errors(spec_lines)
         if pending and path.name == "release.yaml":
             pending_release_errors(payload)
         normalized, version, digest = normalized_manifest(

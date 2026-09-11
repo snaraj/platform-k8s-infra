@@ -312,3 +312,36 @@ binds the proxy. Both cannot hold, and a reviewer said so. The boundary is:
 9. **The private path is enabled last**, under its own authorization.
 
 - Fable5.1
+
+## Amendment: staged reserved-file profile (2026-09-11)
+
+[Issue #20](https://github.com/snaraj/platform-k8s-infra/issues/20) selects the
+separate `local-pie-ssd-reserved` class for both claims, while retaining
+`deploymentReady: false`, the exact 250Gi/4Gi capacities, artifact identities
+and network/controller boundaries. The platform profile in
+[platform #367](https://github.com/snaraj/platform/issues/367) must merge first.
+The existing physical profile remains available through a separately reviewed
+binding; no application code or storage abstraction changes.
+
+This is a source selection, not storage activation. The operator-owned outer
+reconciler remains suspended: the chart can create/bind both claims even at
+zero replicas. Platform qualification must prove full file reservation through
+format/restart/trim, exact backing/mount identities, a ledger including retained
+obligations and host headroom, non-writable fallback roots, ownership and
+recovery. No current runtime, backup or physical-isolation proof is asserted.
+
+The validator now holds the two complete role values and false readiness
+independently of the manifest-shape hash. A later readiness review must update
+this explicit staging guard together with the value and its shape pin, based
+on qualified platform evidence; the earlier one-line description is superseded
+for this profile. Generated artifact updates cannot change these boundaries.
+
+The class uses static local volumes, Retain, WFFC and no automatic expansion.
+Changing an existing bound claim's StorageClass is not an in-place migration,
+and increasing values does not resize these filesystems. A different physical
+or logical backend remains an independently admitted platform profile with a
+reviewed stopped migration, verified recovery and new bindings. Preserve old
+volumes and application identity until acceptance; never delete claims or
+reduce existing capacity promises to complete the transition.
+
+- Codex
