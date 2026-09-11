@@ -221,6 +221,233 @@ class FakeFleet:
         }
 
 
+class ObsSyncFleet(FakeFleet):
+    """Producer-shaped metadata; native payloads are never installed or fetched."""
+    def __init__(self, version="0.1.11"):
+        self.native = tuple(map(int, version.split("."))) > (0, 1, 10)
+        self.release_tag = version if self.native else "v" + version
+        self.native_files = {
+            "main.js": (b"synthetic script", "application/javascript"),
+            "manifest.json": (json.dumps({"id": "obsync", "version": version}).encode(), "application/json"),
+            "styles.css": (b"synthetic style", "text/css"),
+        }
+        super().__init__("obsync", "snaraj/obsync", version, "obsync")
+
+    def release_manifest(self):
+        result = super().release_manifest()
+        result["schema"] = "https://github.com/snaraj/obsync/schemas/release-manifest/v" + ("2" if self.native else "1")
+        result["release"]["tag"] = self.release_tag
+        result["artifacts"]["plugin_bundle"] = {
+            "name": f"obsync-plugin-{self.release_tag}.zip", "digest": sha(b"synthetic bundle"),
+            "contents": ["main.js", "manifest.json", "styles.css"],
+        }
+        if self.native:
+            result["artifacts"]["plugin_files"] = {name: {
+                "digest": sha(body), "size": len(body), "content_type": content_type,
+            } for name, (body, content_type) in self.native_files.items()}
+        return result
+
+    def build(self):
+        super().build()
+        old = "v" + self.version
+        self.release = self.gh.pop(f"repos/{self.site}/releases/tags/{old}")
+        self.gh[f"repos/{self.site}/releases/tags/{self.release_tag}"] = self.release
+        self.gh[f"repos/{self.site}/git/ref/tags/{self.release_tag}"] = self.gh.pop(f"repos/{self.site}/git/ref/tags/{old}")
+        self.gh[f"repos/{self.site}/git/tags/{self.tag_object_sha}"]["tag"] = self.release_tag
+        self.downloads.pop(self.asset_url)
+        name = f"obsync-{self.release_tag}-release-manifest.json"
+        self.asset_url = f"https://github.com/{self.site}/releases/download/{self.release_tag}/{name}"
+        self.downloads[self.asset_url] = self.asset_bytes
+        self.release["assets"] = [{"name": name, "digest": self.asset_digest,
+            "browser_download_url": self.asset_url, "size": len(self.asset_bytes),
+            "content_type": "application/json", "state": "uploaded"}]
+        if self.native:
+            artifact = self.release_manifest()["artifacts"]
+            records = {artifact["plugin_bundle"]["name"]: {
+                "digest": artifact["plugin_bundle"]["digest"], "size": 42, "content_type": "application/zip"},
+                **artifact["plugin_files"]}
+            for name, record in records.items():
+                self.release["assets"].append({**record, "name": name, "state": "uploaded",
+                    "browser_download_url": f"https://github.com/{self.site}/releases/download/{self.release_tag}/{name}"})
+
+    def replace_evidence(self, asset, mirror=False):
+        self.asset_bytes = json.dumps(asset).encode()
+        self.asset_digest = sha(self.asset_bytes)
+        self.downloads[self.asset_url] = self.asset_bytes
+        self.release["assets"][0].update(digest=self.asset_digest, size=len(self.asset_bytes))
+        if mirror:
+            for record in self.release["assets"][1:]:
+                file = asset["artifacts"].get("plugin_files", {}).get(record["name"])
+                if isinstance(file, dict):
+                    record.update(file)
+                elif record["name"].endswith(".zip"):
+                    record["digest"] = asset["artifacts"]["plugin_bundle"]["digest"]
+
+
+class ObsSyncReleaseTests(unittest.TestCase):
+    def test_other_publishers_still_bind_every_stated_image_tag(self):
+        for schema in ("naranjo", "lidersea"):
+            fleet = FakeFleet(schema=schema); asset = fleet.release_manifest()
+            asset["artifacts"]["image"]["tag"] = "v9.9.9"
+            body = json.dumps(asset).encode(); fleet.downloads[fleet.asset_url] = body
+            fleet.gh[f"repos/{fleet.site}/releases/tags/v{fleet.version}"]["assets"][0]["digest"] = sha(body)
+            with self.subTest(schema=schema), self.assertRaisesRegex(MODULE.Refusal, "manifest tag"):
+                fleet.acquire()
+
+    def test_tag_parser_requires_plain_versions_and_exact_repository_identity(self):
+        for value in (None, 1, "", "v0.1.11", "0.1", "0.01.11", "1.0.0-rc1"):
+            with self.subTest(value=value), self.assertRaises(MODULE.Refusal):
+                MODULE.github_release_tag("snaraj/obsync", value)
+        for repository in ("snaraj/obsync-extra", "other/obsync", "snaraj/naranjo.online", "snaraj/lidersea.com"):
+            self.assertEqual(MODULE.github_release_tag(repository, "0.1.11"), "v0.1.11")
+
+    def test_legacy_and_native_versions_bind_distinct_release_and_image_tags(self):
+        for version in ("0.1.9", "0.1.10", "0.1.11", "0.1.12", "0.2.0", "1.0.0"):
+            with self.subTest(version=version):
+                fleet = ObsSyncFleet(version)
+                record, _ = fleet.acquire()
+                self.assertEqual(record, fleet.expected_record())
+                self.assertIn(f":v{version}@", record["workloadImage"])
+                requests = [c[1][-1] for c in fleet.calls if c[0] == "run" and c[1][:2] == ("gh", "api")]
+                self.assertIn(f"repos/snaraj/obsync/releases/tags/{fleet.release_tag}", requests)
+                self.assertIn(f"repos/snaraj/obsync/git/ref/tags/{fleet.release_tag}", requests)
+                self.assertEqual([c for c in fleet.calls if c[0] == "fetch" and "/releases/download/" in c[1]], [("fetch", fleet.asset_url)])
+
+    def test_schema_is_version_closed_and_never_falls_back(self):
+        for version in ("0.1.10", "0.1.11"):
+            for schema in (None, "", "https://naranjo.online/schemas/release-manifest/v1",
+                           "https://github.com/snaraj/obsync/schemas/release-manifest/v" + ("2" if version == "0.1.10" else "1")):
+                with self.subTest(version=version, schema=schema):
+                    fleet = ObsSyncFleet(version); asset = fleet.release_manifest()
+                    asset["schema"] = schema; fleet.replace_evidence(asset)
+                    with self.assertRaisesRegex(MODULE.Refusal, "evidence schema"):
+                        fleet.acquire()
+
+    def test_native_declarations_are_complete_and_closed(self):
+        cases = [
+            ("plugin_files", None, "file inventory"), ("plugin_files", {}, "file inventory"),
+            ("plugin_files", [], "file inventory"), ("plugin_bundle", None, "bundle declaration"),
+        ]
+        for field, value, reason in cases:
+            fleet = ObsSyncFleet(); asset = fleet.release_manifest(); asset["artifacts"][field] = value
+            fleet.replace_evidence(asset)
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(MODULE.Refusal, reason):
+                fleet.acquire()
+        for field, value in (("name", "obsync-plugin-v0.1.11.zip"), ("contents", ["main.js"]), ("extra", True)):
+            fleet = ObsSyncFleet(); asset = fleet.release_manifest(); asset["artifacts"]["plugin_bundle"][field] = value
+            fleet.replace_evidence(asset)
+            with self.subTest(bundle=field), self.assertRaisesRegex(MODULE.Refusal, "bundle declaration"):
+                fleet.acquire()
+        for name in ("main.js", "manifest.json", "styles.css"):
+            for rename in (None, "other.js"):
+                fleet = ObsSyncFleet(); asset = fleet.release_manifest()
+                value = asset["artifacts"]["plugin_files"].pop(name)
+                if rename: asset["artifacts"]["plugin_files"][rename] = value
+                fleet.replace_evidence(asset)
+                with self.subTest(name=name, rename=rename), self.assertRaisesRegex(MODULE.Refusal, "file inventory"):
+                    fleet.acquire()
+
+    def test_native_file_and_bundle_metadata_refuses_independent_invalid_values(self):
+        for name in ("main.js", "manifest.json", "styles.css"):
+            for field, value, reason in (
+                ("size", True, "file metadata"), ("size", 1.0, "file metadata"),
+                ("size", 0, "file metadata"), ("size", 16 * 1024 * 1024 + 1, "file metadata"),
+                ("content_type", "text/plain", "file metadata"), ("extra", True, "file metadata"),
+                ("digest", "sha256:" + "0" * 64, "asset digest"), ("digest", "wrong", "asset digest"),
+                ("digest", None, "asset digest"),
+            ):
+                fleet = ObsSyncFleet(); asset = fleet.release_manifest()
+                asset["artifacts"]["plugin_files"][name][field] = value
+                fleet.replace_evidence(asset, mirror=True)
+                with self.subTest(name=name, field=field, value=value), self.assertRaisesRegex(MODULE.Refusal, reason):
+                    fleet.acquire()
+            for value in (None, [], {"size": 1}):
+                fleet = ObsSyncFleet(); asset = fleet.release_manifest()
+                asset["artifacts"]["plugin_files"][name] = value; fleet.replace_evidence(asset)
+                with self.subTest(name=name, record=value), self.assertRaisesRegex(MODULE.Refusal, "file metadata"):
+                    fleet.acquire()
+        for value in (None, "wrong", "sha256:" + "0" * 64):
+            fleet = ObsSyncFleet(); asset = fleet.release_manifest()
+            asset["artifacts"]["plugin_bundle"]["digest"] = value; fleet.replace_evidence(asset, mirror=True)
+            with self.subTest(bundleDigest=value), self.assertRaisesRegex(MODULE.Refusal, "asset digest"):
+                fleet.acquire()
+
+    def test_non_object_native_answers_refuse_without_a_traceback(self):
+        for malformed in ("evidence", "artifacts", "release-asset", "assets-map", "asset-name"):
+            fleet = ObsSyncFleet()
+            if malformed == "evidence": fleet.replace_evidence([])
+            elif malformed == "artifacts":
+                asset = fleet.release_manifest(); asset["artifacts"] = ["wrong"]
+                fleet.replace_evidence(asset)
+            elif malformed == "release-asset": fleet.release["assets"][-1] = ["wrong"]
+            elif malformed == "assets-map": fleet.release["assets"] = {str(i): {} for i in range(5)}
+            else: fleet.release["assets"][-1]["name"] = None
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(MODULE.Refusal, "malformed answer"):
+                fleet.acquire()
+
+    def test_native_expanded_size_boundary_matches_the_producer(self):
+        fleet = ObsSyncFleet(); asset = fleet.release_manifest(); files = asset["artifacts"]["plugin_files"]
+        limit = 16 * 1024 * 1024
+        files["main.js"]["size"] = limit - files["manifest.json"]["size"] - files["styles.css"]["size"]
+        fleet.replace_evidence(asset, mirror=True); fleet.acquire()
+        files["main.js"]["size"] += 1; fleet.replace_evidence(asset, mirror=True)
+        with self.assertRaisesRegex(MODULE.Refusal, "expanded bundle limit"):
+            fleet.acquire()
+
+    def test_native_release_inventory_and_metadata_are_bound(self):
+        for change, reason in (
+            (lambda r: r.pop(), "asset inventory"),
+            (lambda r: r.append(dict(r[-1])), "asset inventory"),
+            (lambda r: r.__setitem__(-1, dict(r[-2])), "asset name"),
+            (lambda r: r[-1].update(name="other.css"), "asset name"),
+        ):
+            fleet = ObsSyncFleet(); change(fleet.release["assets"])
+            with self.assertRaisesRegex(MODULE.Refusal, reason): fleet.acquire()
+        for index in range(5):
+            for field, value, reason in (
+                ("state", "new", "uploaded asset"), ("size", True, "uploaded asset"),
+                ("size", 0, "uploaded asset"), ("size", 16 * 1024 * 1024 + 1, "uploaded asset"),
+                ("browser_download_url", "https://example.invalid/asset", "outside|uploaded asset"),
+                ("content_type", "text/plain", "metadata contradicts"),
+                ("digest", "sha256:" + "f" * 64, "GitHub states|metadata contradicts"),
+            ):
+                fleet = ObsSyncFleet(); fleet.release["assets"][index][field] = value
+                with self.subTest(index=index, field=field), self.assertRaisesRegex(MODULE.Refusal, reason):
+                    fleet.acquire()
+        fleet = ObsSyncFleet(); fleet.release["assets"][2]["size"] += 1
+        with self.assertRaisesRegex(MODULE.Refusal, "metadata contradicts"): fleet.acquire()
+
+    def test_native_tag_identity_and_protected_source_bindings_remain_required(self):
+        for path in (("release", "tag"), ("artifacts", "image", "tag")):
+            for missing in (False, True):
+                fleet = ObsSyncFleet(); asset = fleet.release_manifest(); target = asset
+                for key in path[:-1]: target = target[key]
+                if missing: target.pop(path[-1])
+                else: target[path[-1]] = "incorrect"
+                fleet.replace_evidence(asset)
+                with self.subTest(path=path, missing=missing), self.assertRaisesRegex(MODULE.Refusal, "manifest.*tag"):
+                    fleet.acquire()
+        fleet = ObsSyncFleet(); asset = fleet.release_manifest(); asset["tag"] = "v0.1.11"
+        fleet.replace_evidence(asset)
+        with self.assertRaisesRegex(MODULE.Refusal, "manifest tag"): fleet.acquire()
+        for changed in ("tag", "source", "ancestry"):
+            fleet = ObsSyncFleet()
+            if changed == "tag": fleet.gh[f"repos/{fleet.site}/git/tags/{fleet.tag_object_sha}"]["tag"] = "v0.1.11"
+            elif changed == "source": fleet.gh[f"repos/{fleet.site}/git/tags/{fleet.tag_object_sha}"]["object"]["sha"] = "a" * 40
+            else: fleet.gh[f"repos/{fleet.site}/compare/main...{fleet.source_sha}"] = {"status": "diverged"}
+            with self.subTest(changed=changed), self.assertRaises(MODULE.Refusal): fleet.acquire()
+
+    def test_native_chart_must_still_pin_the_prefixed_image_tag(self):
+        for tag in ("0.1.11", "v0.1.12"):
+            fleet = ObsSyncFleet()
+            values = fleet.values_yaml.replace(b"tag: v0.1.11", ("tag: " + tag).encode())
+            fleet.overrides["layer_bytes"] = fleet.tar({
+                "obsync/Chart.yaml": fleet.chart_yaml, "obsync/values.yaml": values})
+            fleet.build()
+            with self.subTest(tag=tag), self.assertRaisesRegex(MODULE.Refusal, "embedded image pin"):
+                fleet.acquire()
+
+
 class CeremonyTests(unittest.TestCase):
     def test_honest_fleet_yields_the_exact_record_and_pins_cosign_at_digests(self):
         for schema in ("naranjo", "lidersea"):
@@ -562,4 +789,3 @@ def hostile_tar(entries) -> bytes:
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
-

@@ -922,6 +922,50 @@ spec:
                 path.write_text(original)
         composition.check(self.root)
 
+    def test_reserved_storage_stays_staged_with_the_exact_two_claims(self):
+        path = self.root / "kubernetes/websites/obsync/release.yaml"
+        source = path.read_text()
+        self.assertEqual(source.count("        className: local-pie-ssd-reserved"), 2)
+        self.assertEqual(composition.READY_LINE.findall(source), ["false"])
+        composition.check(self.root)
+
+    def test_repinning_cannot_enable_or_partially_replace_reserved_storage(self):
+        path = self.root / "kubernetes/websites/obsync/release.yaml"
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        original, original_shapes = path.read_text(), shapes_path.read_text()
+        cases = (
+            ("    deploymentReady: false", "    deploymentReady: true", "must remain not ready"),
+            ("    deploymentReady: false", "    deploymentReady: 0", "must remain not ready"),
+            ("    deploymentReady: false\n", "", "must remain not ready"),
+            ("        className: local-pie-ssd-reserved", "        className: local-pie-ssd", "staged reserved-file profile"),
+            ("        className: local-pie-ssd-reserved", "        className: unknown-class", "staged reserved-file profile"),
+            ("      blobs:", "      blob:", "staged reserved-file profile"),
+            ("      journal:", "      journal: []", "staged reserved-file profile"),
+            ("    storage:", "    storage: []", "staged reserved-file profile"),
+            ("        capacity: 250Gi", "        capacity: 249Gi", "staged reserved-file profile"),
+            ("        size: 250Gi", "        size: 251Gi", "staged reserved-file profile"),
+            ("        capacity: 4Gi", "        capacity: 3Gi", "staged reserved-file profile"),
+            ("        size: 4Gi", "        size: 5Gi", "staged reserved-file profile"),
+            ("    storage:\n", "    storage:\n      mirrors: []\n", "staged reserved-file profile"),
+            ("        size: 4Gi", "        size: 4Gi\n        extra: []", "staged reserved-file profile"),
+            ("        size: 4Gi", "        size: 4Gi\n          nested: []", "staged reserved-file profile"),
+            ("        className: local-pie-ssd-reserved\n        size: 4Gi", "        className: other-class\n        size: 4Gi", "staged reserved-file profile"),
+        )
+        for before, after, expected in cases:
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                changed = original.replace(before, after, 1)
+                path.write_text(changed)
+                shapes = json.loads(original_shapes)
+                normalized, _, _ = composition.normalized_manifest(changed.encode(), False)
+                shapes["kubernetes/websites/obsync/release.yaml"] = hashlib.sha256(normalized).hexdigest()
+                shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+                with self.assertRaisesRegex(ValueError, expected):
+                    composition.check(self.root)
+                path.write_text(original)
+                shapes_path.write_text(original_shapes)
+        composition.check(self.root)
+
     def test_complete_record_schema_is_closed_before_network_access(self):
         original = self.receipt()
         changes = (

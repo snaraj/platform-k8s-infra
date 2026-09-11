@@ -588,7 +588,80 @@ def profile_for(subject: str) -> str:
     raise Refusal(f"no acquisition profile for publisher identity {subject}")
 
 
-def release_manifest_statements(asset: dict) -> dict:
+def github_release_tag(repository: str, version: str) -> str:
+    """Publisher-owned tag spelling; never infer legacy from missing evidence."""
+    if not isinstance(version, str) or VERSION_RE.fullmatch(version) is None:
+        raise Refusal("release version is not a plain semantic version")
+    if repository == "snaraj/obsync" and tuple(map(int, version.split("."))) > (0, 1, 10):
+        return version
+    return f"v{version}"
+
+
+OBSYNC_PLUGIN_FILES = {"main.js": "application/javascript", "manifest.json": "application/json", "styles.css": "text/css"}
+OBSYNC_PLUGIN_MAX_BYTES = 16 * 1024 * 1024
+
+
+def bind_obsync_release(asset: dict, version: str, tag: str, release: dict, asset_bytes: bytes) -> None:
+    """Check version-closed evidence and native asset metadata, not installed bytes.
+
+    Chart/image acquisition still verifies its own bytes and signatures. Native
+    file byte equality and installation belong to the producer and device gates.
+    """
+    native = tag == version
+    schema = "https://github.com/snaraj/obsync/schemas/release-manifest/v" + ("2" if native else "1")
+    if asset.get("schema") != schema:
+        raise Refusal("obsync release evidence schema does not match its version")
+    if not native:
+        return
+    artifacts = asset.get("artifacts") or {}
+    bundle = artifacts.get("plugin_bundle")
+    files = artifacts.get("plugin_files")
+    bundle_name = f"obsync-plugin-{tag}.zip"
+    if (not isinstance(bundle, dict) or set(bundle) != {"name", "digest", "contents"}
+            or bundle.get("name") != bundle_name or bundle.get("contents") != list(OBSYNC_PLUGIN_FILES)):
+        raise Refusal("obsync native bundle declaration is not exact")
+    if not isinstance(files, dict) or set(files) != set(OBSYNC_PLUGIN_FILES):
+        raise Refusal("obsync native file inventory is not exact")
+    expected = {
+        f"obsync-{tag}-release-manifest.json": {
+            "digest": sha256_hex(asset_bytes), "size": len(asset_bytes), "content_type": "application/json"},
+        bundle_name: {"digest": bundle["digest"], "content_type": "application/zip"},
+    }
+    total = 0
+    for name, content_type in OBSYNC_PLUGIN_FILES.items():
+        record = files[name]
+        if (not isinstance(record, dict) or set(record) != {"digest", "size", "content_type"}
+                or type(record.get("size")) is not int or not 0 < record["size"] <= OBSYNC_PLUGIN_MAX_BYTES
+                or record.get("content_type") != content_type):
+            raise Refusal("obsync native file metadata is invalid")
+        total += record["size"]
+        expected[name] = dict(record)
+    if total > OBSYNC_PLUGIN_MAX_BYTES:
+        raise Refusal("obsync native files exceed the producer's expanded bundle limit")
+    for record in expected.values():
+        digest = record["digest"]
+        if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None or digest == "sha256:" + "0" * 64:
+            raise Refusal("obsync native asset digest is invalid")
+    records = release.get("assets")
+    # The decoded JSON inventory has already passed the manifest-asset lookup;
+    # non-array inventories and non-string names cannot survive that traversal.
+    if len(records) != len(expected):
+        raise Refusal("obsync native release asset inventory is not exact")
+    seen = set()
+    for record in records:
+        name = record.get("name")
+        if name not in expected or name in seen:
+            raise Refusal("obsync native release asset name is foreign or duplicated")
+        seen.add(name)
+        if (record.get("state") != "uploaded" or type(record.get("size")) is not int
+                or not 0 < record["size"] <= OBSYNC_PLUGIN_MAX_BYTES
+                or record.get("browser_download_url") != f"https://github.com/snaraj/obsync/releases/download/{tag}/{name}"):
+            raise Refusal("obsync native release asset is not a bounded exact uploaded asset")
+        if any(record.get(field) != value for field, value in expected[name].items()):
+            raise Refusal("obsync native release asset metadata contradicts its evidence")
+
+
+def release_manifest_statements(asset: dict, *, split_image_tag: bool = False) -> dict:
     """Every statement a Release manifest makes about the resolved identities,
     across both publisher schemas in the fleet (``lidersea.release-manifest/v1``
     carries ``tag``/``version``/``workflow_identity`` and nested ``signature``
@@ -604,7 +677,7 @@ def release_manifest_statements(asset: dict) -> dict:
     candidates = {
         "repository": [asset.get("repository")],
         "version": [asset.get("version"), release.get("version"), chart.get("tag")],
-        "tag": [asset.get("tag"), release.get("tag"), image.get("tag")],
+        "tag": [asset.get("tag"), release.get("tag")],
         "identity": [
             asset.get("workflow_identity"),
             chart.get("signature_identity"),
@@ -622,6 +695,10 @@ def release_manifest_statements(asset: dict) -> dict:
         "image.repository": [image.get("repository"), image.get("registry")],
         "image.digest": [image.get("digest")],
     }
+    if split_image_tag:
+        candidates["image.tag"] = [image.get("tag")]
+    else:
+        candidates["tag"].append(image.get("tag"))
     return {key: [value for value in values if value is not None] for key, values in candidates.items()}
 
 
@@ -630,7 +707,10 @@ def bind_release_manifest(asset: dict, expected: dict, label: str) -> None:
     fields — repository, version, publisher identity, chart and image
     digests — must be stated at least once."""
 
-    statements = release_manifest_statements(asset)
+    obsync = expected.get("repository") == "snaraj/obsync"
+    statements = release_manifest_statements(asset, split_image_tag=obsync)
+    if obsync:
+        expected = {**expected, "image.tag": f"v{expected['version']}"}
     for field, value in expected.items():
         stated = statements.get(field, [])
         for candidate in stated:
@@ -652,7 +732,8 @@ def acquire_release_publisher(
     slug, chart_repo, subject = selection.slug, selection.chart_repository, selection.subject
     # The site publisher contract names the workload image after the chart.
     image_repo = f"{REGISTRY_HOST}/snaraj/{slug}"
-    tag = f"v{version}"
+    tag = github_release_tag(selection.source_repository, version)
+    image_tag = f"v{version}"
 
     manifest_digest, manifest_bytes = resolve_twice(registry, chart_repo, version, OCI_MANIFEST)
     manifest = json.loads(manifest_bytes)
@@ -681,17 +762,17 @@ def acquire_release_publisher(
     if chart_identity(chart_yaml.decode("utf-8")) != expected_chart:
         raise Refusal(f"{chart_repo}:{version}: Chart.yaml identity is not {expected_chart}")
     pin = image_pin(values_yaml.decode("utf-8"))
-    if pin["repository"] != image_repo or pin["tag"] != tag:
-        raise Refusal(f"{slug}: embedded image pin {pin} is not {image_repo}:{tag}")
+    if pin["repository"] != image_repo or pin["tag"] != image_tag:
+        raise Refusal(f"{slug}: embedded image pin {pin} is not {image_repo}:{image_tag}")
     if DIGEST_RE.fullmatch(pin["digest"]) is None:
         raise Refusal(f"{slug}: embedded image digest {pin['digest']!r} is malformed")
 
-    index_digest, index_bytes = resolve_twice(registry, image_repo, tag, OCI_INDEX)
+    index_digest, index_bytes = resolve_twice(registry, image_repo, image_tag, OCI_INDEX)
     if index_digest != pin["digest"]:
-        raise Refusal(f"{image_repo}:{tag}: index {index_digest} is not the embedded pin {pin['digest']}")
+        raise Refusal(f"{image_repo}:{image_tag}: index {index_digest} is not the embedded pin {pin['digest']}")
     index = json.loads(index_bytes)
     if index.get("mediaType") != OCI_INDEX:
-        raise Refusal(f"{image_repo}:{tag}: not an OCI image index")
+        raise Refusal(f"{image_repo}:{image_tag}: not an OCI image index")
     arm64 = [
         child["digest"]
         for child in index.get("manifests", [])
@@ -699,7 +780,7 @@ def acquire_release_publisher(
         and child.get("platform", {}).get("architecture") == "arm64"
     ]
     if len(arm64) != 1 or DIGEST_RE.fullmatch(arm64[0]) is None:
-        raise Refusal(f"{image_repo}:{tag}: expected exactly one linux/arm64 child")
+        raise Refusal(f"{image_repo}:{image_tag}: expected exactly one linux/arm64 child")
 
     cosign.verify_chart(chart_repo, manifest_digest, subject)
     cosign.verify_provenance(image_repo, index_digest, subject)
@@ -720,6 +801,8 @@ def acquire_release_publisher(
         raise Refusal(f"{selection.source_repository} {tag}: asset bytes hash to {asset_digest}, GitHub states {assets[0].get('digest')}")
     asset = json.loads(asset_bytes)
     source_sha = asset.get("source_sha")
+    if selection.source_repository == "snaraj/obsync":
+        bind_obsync_release(asset, version, tag, release, asset_bytes)
     bind_release_manifest(
         asset,
         {
@@ -764,7 +847,7 @@ def acquire_release_publisher(
         "matchingChartLayerCount": 1,
         "release": {"assetDigest": asset_digest, "sourceSha": source_sha},
         "signer": {"issuer": ACTIONS_ISSUER, "subject": subject},
-        "workloadImage": f"{image_repo}:{tag}@{index_digest}",
+        "workloadImage": f"{image_repo}:{image_tag}@{index_digest}",
     }
     inspection = {"Chart.yaml": sha256_hex(chart_yaml), "values.yaml": sha256_hex(values_yaml)}
     return record, inspection
@@ -779,7 +862,7 @@ def acquire(selection: Selection, version: str, registry, github, cosign) -> tup
     profile = PROFILES[profile_for(selection.subject)]
     try:
         return profile(selection, version, registry, github, cosign)
-    except (KeyError, TypeError, ValueError, tarfile.TarError, OSError) as error:
+    except (AttributeError, KeyError, TypeError, ValueError, tarfile.TarError, OSError) as error:
         # A malformed registry, Release or cosign answer is a refusal with a
         # name, never a traceback the tick cannot report.
         raise Refusal(f"{selection.slug} {version}: malformed answer ({type(error).__name__}: {error})") from None
