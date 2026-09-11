@@ -44,8 +44,9 @@ class UpdatesTests(unittest.TestCase):
         parts[2] += 1
         target = ".".join(map(str, parts))
         release = self.releases[selection.source_repository]
-        release["tag_name"] = f"v{target}"
-        release["html_url"] = f"https://github.com/{selection.source_repository}/releases/tag/v{target}"
+        tag = target if slug == "obsync" and tuple(parts) > (0, 1, 10) else f"v{target}"
+        release["tag_name"] = tag
+        release["html_url"] = f"https://github.com/{selection.source_repository}/releases/tag/{tag}"
         record = self.records[slug]
         record["chartTag"] = target
         record["chart"]["version"] = record["chart"]["appVersion"] = target
@@ -123,6 +124,7 @@ class UpdatesTests(unittest.TestCase):
         original = self.releases[repo]
         changes = ({"immutable": False}, {"draft": True}, {"prerelease": True},
                    {"id": True}, {"id": 0}, {"html_url": "https://example.invalid/release"},
+                   {"tag_name": None},
                    {"tag_name": "v0.0.1"}, {"tag_name": "v01.2.3"},
                    {"tag_name": "v1.2.3-rc1"}, {"tag_name": "1.2.3"})
         for delta in changes:
@@ -139,6 +141,21 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(files, {})
         self.assertEqual(acquire.call_count, len(updates.validate.APPLICATIONS))
         self.assertEqual(set(targets), set(self.selections))
+
+    def test_obsync_latest_tag_spelling_is_closed_at_the_native_release_boundary(self):
+        repo = "snaraj/obsync"
+        for version, tag in (("0.1.10", "v0.1.10"), ("0.1.11", "0.1.11"),
+                             ("0.2.0", "0.2.0"), ("1.0.0", "1.0.0")):
+            for valid in (True, False):
+                candidate = tag if valid else (tag[1:] if tag.startswith("v") else "v" + tag)
+                self.releases[repo].update(tag_name=candidate,
+                    html_url=f"https://github.com/{repo}/releases/tag/{candidate}")
+                with self.subTest(version=version, tag=candidate):
+                    if valid:
+                        self.assertEqual(updates.latest(self.selections, self.github)["obsync"]["version"], version)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "versioned format"):
+                            updates.latest(self.selections, self.github)
 
     def test_new_plan_has_only_changed_selection_and_complete_valid_receipt(self):
         self.advance("naranjo-online")

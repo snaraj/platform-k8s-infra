@@ -50,15 +50,17 @@ def version(value):
 
 
 def latest(selections, github):
-    """An exact two-application inventory is required even for a read-only check."""
+    """The exact active inventory is required even for a read-only check."""
     require(set(selections) == set(validate.APPLICATIONS), "application inventory is not exact")
     result = {}
     for slug, selection in sorted(selections.items()):
         release = github.api(f"repos/{selection.source_repository}/releases/latest")
         tag = release.get("tag_name", "")
-        require(isinstance(tag, str) and tag.startswith("v"), "latest tag is malformed")
-        target = tag[1:]
+        require(isinstance(tag, str), "latest tag is malformed")
+        target = tag[1:] if tag.startswith("v") else tag
         require(version(target) >= version(selection.version), "latest release regressed")
+        require(tag == artifacts.github_release_tag(selection.source_repository, target),
+                "latest tag does not match the publisher's versioned format")
         require(release.get("immutable") is True and release.get("draft") is False
                 and release.get("prerelease") is False and type(release.get("id")) is int
                 and release["id"] > 0 and release.get("html_url") ==
