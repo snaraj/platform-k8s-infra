@@ -16,17 +16,17 @@
       "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.45@sha256:f8132c43dcbf0943417adc975941177c06377a6140667fa3f16d6a62533b8422"
     },
     "naranjo-online": {
-      "arm64Digest": "sha256:64bb173b1c04fb2435a6e6e37914bafeb7a88e7236ff83a122a2e5de81f0b1cd",
-      "chart": {"appVersion": "0.1.83", "name": "naranjo-online", "version": "0.1.83"},
-      "chartConfigDigest": "sha256:34475d2e2ead7a17228ad5726f79d2a14cb04d9a4ad440f41b5c729a866ae4fa",
-      "chartLayerDigest": "sha256:822a831f90ed08d2f6bcf6fca850024361b2282ae40559a5b31f6d46ff3f46cf",
+      "arm64Digest": "sha256:499a97bef5ef5c4e51c3c817b6b5856b4dcad1f7c2be0bea37a59f531e347dd0",
+      "chart": {"appVersion": "0.1.84", "name": "naranjo-online", "version": "0.1.84"},
+      "chartConfigDigest": "sha256:74d381bb63c70d76ab468b44e21d086c64cd7b44e1d89fdd01b19236cb3a29dd",
+      "chartLayerDigest": "sha256:fe3dcc4903bf34a060773c8f44cba4cb294dab2ee7d00fe56fdd8f4cac490bd8",
       "chartRepository": "ghcr.io/snaraj/charts/naranjo-online",
-      "chartTag": "0.1.83",
-      "manifestDigest": "sha256:bff487a18e4deea29f504301a1ebf35d8786ab30ab7ef8df269eebe79d143bb3",
+      "chartTag": "0.1.84",
+      "manifestDigest": "sha256:37c771376088ebeb645389d020af7b9a5dec2ea376ccc185f21182e398e783d1",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:e8935c7f1207ab59450793aaa294e7078aacc5cff771ca9a55a1e6962e8c5926", "sourceSha": "73be568c7da47bb228e99aff1858da8e31023619"},
+      "release": {"assetDigest": "sha256:c544fb39d14abd7c685e7abc5e38975294ed70ab620756f47ffedaa18ddd9f8b", "sourceSha": "d37fe64322758f210532d002f10910dc9395a2f8"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/naranjo.online/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.83@sha256:b2524ec0dbae8b9156aeba772e1761dd4bb6cea055d4a33af996b0da3ee3b1d8"
+      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.84@sha256:dec17903d4752fe00bcc959b6cf01488bc3ba8e72a910ee5ba7077ad97e30c13"
     },
     "obsync": {
       "arm64Digest": "sha256:6888d8104a40b9cd24406d38f7b6c4f21f93ed3dc8345a406a06019ee6cc93b9",
