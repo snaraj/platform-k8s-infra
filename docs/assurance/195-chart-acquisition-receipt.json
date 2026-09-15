@@ -3,17 +3,17 @@
   "capturedDate": "2026-09-15",
   "records": {
     "lidersea-com": {
-      "arm64Digest": "sha256:7a6901bc99ebe80a7c1fb26b24f413a13db0da1330e2bde92162826a901ff8fd",
-      "chart": {"appVersion": "0.1.45", "name": "lidersea-com", "version": "0.1.45"},
-      "chartConfigDigest": "sha256:f3db702c28586b18c1637a1952b53ad4f526c05c29d17e1f7c59628a7e8524d6",
-      "chartLayerDigest": "sha256:74e168b087ede2e667e303da2002188e006ded550aff13ab43f08a91a9113258",
+      "arm64Digest": "sha256:e6c2055c7b29d626dd6f574b44118c72e7b6f0368a2614a2a3e7572e156a2e83",
+      "chart": {"appVersion": "0.1.46", "name": "lidersea-com", "version": "0.1.46"},
+      "chartConfigDigest": "sha256:460d6c045f5cc356790adc65b28d958620b3911b68962e0c01b487acfce85760",
+      "chartLayerDigest": "sha256:77859778993ff0269da6f12ece89f01e49ae3a3898b01296e49a32d648e88b3c",
       "chartRepository": "ghcr.io/snaraj/charts/lidersea-com",
-      "chartTag": "0.1.45",
-      "manifestDigest": "sha256:5e1bfc525d9d8f464bc8aaae068683d03e868e31a5bd1630a1a9a4cb88063d9d",
+      "chartTag": "0.1.46",
+      "manifestDigest": "sha256:10b99a74d91f87dcc2733be70c2b1f6a7b6ddb74addaf1a6192943112f6190d6",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:c3936926f1303051cb6f78f3382f99ce56928325000d4c3c2e6091cfa29a056d", "sourceSha": "860ca1cef9e71c0a9532030ed1eae1c2c149ed89"},
+      "release": {"assetDigest": "sha256:630477a0f7930c82ba6202c484df9e5f0e3309facfc0d0c68e264ac61f590b23", "sourceSha": "a85359553e6de602e6e95c3a04815d608df44df5"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/lidersea.com/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.45@sha256:f8132c43dcbf0943417adc975941177c06377a6140667fa3f16d6a62533b8422"
+      "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.46@sha256:d95686399a00fa6a127f39afc5ee31d5f7f86f459113de05fb05cf691d037864"
     },
     "naranjo-online": {
       "arm64Digest": "sha256:716158b45f4cef15d5d4f679560675cdafad4da9ec3603ca4351f4cec6271a83",
