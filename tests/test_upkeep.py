@@ -12,8 +12,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEQL_ACTION = re.compile(
-    r"github/codeql-action/(?P<sub>init|analyze)@(?P<sha>[0-9a-f]{40})"
+    r"^ {6}- uses: github/codeql-action/(?P<sub>init|analyze)@(?P<sha>[0-9a-f]{40})"
     r"\s+#\s+(?P<version>v[0-9]+\.[0-9]+\.[0-9]+)"
+    r"$",
+    re.MULTILINE,
 )
 
 
@@ -54,13 +56,33 @@ class UpkeepTests(unittest.TestCase):
             self.assertEqual(set(group), {"patterns", "applies-to"})
             self.assertEqual(group["patterns"], ["github/codeql-action*"])
 
-    def test_codeql_init_and_analyze_stay_on_one_immutable_release(self):
-        workflow = (ROOT / ".github/workflows/codeql.yml").read_text()
+    def assert_codeql_init_and_analyze_stay_on_one_immutable_release(self, workflow):
         pins = CODEQL_ACTION.findall(workflow)
         self.assertEqual({sub for sub, _sha, _version in pins}, {"init", "analyze"})
         self.assertEqual(len(pins), 2)
         self.assertEqual(len({sha for _sub, sha, _version in pins}), 1)
         self.assertEqual(len({version for _sub, _sha, version in pins}), 1)
+
+    def test_codeql_init_and_analyze_stay_on_one_immutable_release(self):
+        workflow = (ROOT / ".github/workflows/codeql.yml").read_text()
+        self.assert_codeql_init_and_analyze_stay_on_one_immutable_release(workflow)
+
+    def test_a_commented_reference_cannot_replace_the_codeql_analyze_step(self):
+        workflow = (ROOT / ".github/workflows/codeql.yml").read_text()
+        mutant, replacements = re.subn(
+            r"^ {6}- uses: github/codeql-action/analyze@[^\n]+\n"
+            r" {8}with:\n"
+            r" {10}category: /language:python\n",
+            "      # github/codeql-action/analyze@"
+            "b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0\n",
+            workflow,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        self.assertEqual(replacements, 1)
+        self.assertNotIn("- uses: github/codeql-action/analyze@", mutant)
+        with self.assertRaises(AssertionError):
+            self.assert_codeql_init_and_analyze_stay_on_one_immutable_release(mutant)
 
     def test_artifact_verification_has_daily_and_manual_entry_points(self):
         self.assertEqual(set(self.workflow["on"]), {"schedule", "workflow_dispatch"})
