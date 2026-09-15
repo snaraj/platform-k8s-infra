@@ -11,6 +11,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CODEQL_ACTION = re.compile(
+    r"github/codeql-action/(?P<sub>init|analyze)@(?P<sha>[0-9a-f]{40})"
+    r"\s+#\s+(?P<version>v[0-9]+\.[0-9]+\.[0-9]+)"
+)
 
 
 def definition(path):
@@ -49,6 +53,14 @@ class UpkeepTests(unittest.TestCase):
         for group in groups:
             self.assertEqual(set(group), {"patterns", "applies-to"})
             self.assertEqual(group["patterns"], ["github/codeql-action*"])
+
+    def test_codeql_init_and_analyze_stay_on_one_immutable_release(self):
+        workflow = (ROOT / ".github/workflows/codeql.yml").read_text()
+        pins = CODEQL_ACTION.findall(workflow)
+        self.assertEqual({sub for sub, _sha, _version in pins}, {"init", "analyze"})
+        self.assertEqual(len(pins), 2)
+        self.assertEqual(len({sha for _sub, sha, _version in pins}), 1)
+        self.assertEqual(len({version for _sub, _sha, version in pins}), 1)
 
     def test_artifact_verification_has_daily_and_manual_entry_points(self):
         self.assertEqual(set(self.workflow["on"]), {"schedule", "workflow_dispatch"})
