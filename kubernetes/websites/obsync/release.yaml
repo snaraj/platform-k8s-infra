@@ -66,34 +66,38 @@ spec:
   values:
     # The reviewed activation gate, and the one value here that describes the
     # CLUSTER rather than this repository — which is why selecting a verified
-    # chart does not move it. It stays false until the `obsidian` namespace, the
-    # `obsync-blobs` and `obsync-journal` PersistentVolumes and the
-    # `obsync-server-key` Secret all exist, and none of that is confirmed: the
-    # cluster's storage-admission and bootstrap-prerequisite gates are still
-    # unsatisfied.
+    # chart never moves it, in either direction. It is `true` because the
+    # operator proved the prerequisites it names, in the reviewed order and
+    # each under its own authorization: the `obsidian` namespace with both
+    # reconciler authority layers; the ADR 0012 physical-profile host
+    # preparation of `snaraj/platform`'s application-sync runbook section 3b —
+    # `/mnt/local-pie-ssd/obsidian/obsync-blobs` and `…/obsync-journal` owned
+    # `65532:65532`, mode `0700`, root-owned non-group-writable parents, no
+    # symlink on either path; the two operator-owned PersistentVolumes
+    # `obsync-blobs` and `obsync-journal` on the existing `local-pie-ssd`
+    # class; and the `obsync-server-key` Secret from the owner ceremony. That
+    # evidence is referenced sanitized from the promotion review, never carried
+    # here.
     #
-    # What `false` MEANS in the selected chart, stated exactly, because the
-    # predecessor of this comment overstated it. In obsync v0.1.4 this value
-    # gates the rendered Deployment's `spec.replicas` — 0 when false, 1 when
-    # true — and gates nothing else: the SAME six objects render at either value
+    # What this value DOES in the selected chart, stated exactly. It gates the
+    # rendered Deployment's `spec.replicas` — 0 when false, 1 when true — and
+    # gates nothing else: the SAME six objects render at either value
     # (ServiceAccount, Service, NetworkPolicy, both PersistentVolumeClaims and
-    # the Deployment), and the `platform.snaraj.dev/deployment-ready` annotation
-    # is still carried. Nothing is omitted at `false`; a non-boolean value is
-    # refused by the chart's closed schema, and the chart's own render pins
-    # (`scripts/ci/chart_pins.py readiness`) hold both shapes. The claims render
-    # at `false` deliberately, so they bind their pre-provisioned volumes before
-    # any Pod exists, and the Service renders so the TLS proxy can resolve it.
+    # the Deployment), and the `platform.snaraj.dev/deployment-ready`
+    # annotation is carried at both. Nothing was omitted at `false`; a
+    # non-boolean value is refused by the chart's closed schema, and the
+    # chart's own render pins (`scripts/ci/chart_pins.py readiness`) hold both
+    # shapes. The claims already rendered at `false` so they could bind their
+    # pre-provisioned volumes, and the Service already rendered so the TLS
+    # proxy could resolve it; with WaitForFirstConsumer the binding only
+    # completes once this value schedules a Pod.
     #
-    # Two consequences. Objects DO render, so the stop before the cluster is the
-    # operator's reconciler — created SUSPENDED, unsuspended only after the
-    # prerequisites above are proven — and not this value alone. And v0.1.3
-    # carried this value into the `platform.snaraj.dev/deployment-ready`
-    # annotation only, rendering the one-replica Deployment regardless: that
-    # was a claim rather than a gate, which is why the selection moved to
-    # v0.1.4. Flipping this to `true` is its own reviewed one-line change
-    # against prerequisites the operator proved, never a side effect of
-    # selecting a chart.
-    deploymentReady: false
+    # Two consequences. Reconciling this starts ONE application replica, so the
+    # operator's suspended reconciler is unsuspended by the platform runbook's
+    # own step and not by this file. And the reverse is equally a reviewed
+    # composition change: a readiness rollback is never a claim deletion, a
+    # data deletion or an artifact change.
+    deploymentReady: true
     # `none`, NOT `cloudflare`, and the wrong value here fails closed but
     # totally. `cloudflare` makes the server REQUIRE the edge's
     # connecting-address and request-id headers on every request and refuse
@@ -147,18 +151,35 @@ spec:
     # `size` is what the claim requests AND what the server is told through
     # OBSYNC_*_CAPACITY — the claim guarantee is the only number that cannot
     # overstate what the pod may write. `capacity` records what the operator
-    # provisioned on the volume the claim binds to. The reserved-file profile
-    # is static and does not expand or migrate an existing bound claim through
-    # a values edit. Platform qualification and separate readiness review are
-    # required; the outer reconciler must stay suspended until then.
+    # provisioned on the volume the claim binds to, so the two are equal here.
+    #
+    # THE PHYSICAL PROFILE, not the reserved-file one. `local-pie-ssd` is the
+    # existing ADR 0012 class the two sites already use: a static
+    # no-provisioner class over directories on the node's local SSD, with the
+    # volumes created by the operator and pre-bound to these exact claims. The
+    # `local-pie-ssd-reserved` profile of ADR 0017 was selected first and is NOT
+    # deliverable: its qualification requires a FIEMAP collector and an
+    # installed-kernel discard-prevention mechanism that `snaraj/platform` does
+    # not ship, and the SSD has less free space than a fully allocated 250 GiB
+    # backing file needs. That profile's source remains admitted in the
+    # platform's policy and can be selected later by its own reviewed change.
+    #
+    # WHAT 100Gi MEANS HERE, said plainly because the class does not enforce
+    # it. A local PersistentVolume ADVERTISES capacity; it reserves nothing on
+    # a filesystem shared with the media library. This number is the
+    # application's own budget — the claim guarantee plus OBSYNC_BLOBS_CAPACITY
+    # — chosen to sit inside the measured headroom, not a physical reservation.
+    # Buying a reservation was exactly what the reserved-file profile was for.
+    # Changing either number is a reviewed composition change; neither class
+    # expands or migrates an already-bound claim through a values edit.
     storage:
       blobs:
-        capacity: 250Gi
-        className: local-pie-ssd-reserved
-        size: 250Gi
+        capacity: 100Gi
+        className: local-pie-ssd
+        size: 100Gi
       journal:
         capacity: 4Gi
-        className: local-pie-ssd-reserved
+        className: local-pie-ssd
         size: 4Gi
     # Empty is the STRICT setting, not the lazy one: in `none` edge mode the
     # server believes a forwarded address only from a listed range, so an empty

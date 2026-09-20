@@ -523,33 +523,39 @@ def storage_activation_errors(payload: bytes) -> None:
 
 
 def obsync_storage_profile_errors(spec_lines: list[tuple[int, str]]) -> None:
-    """Hold the reviewed staging boundary independently of a regenerated pin.
+    """Hold the reviewed activation boundary independently of a regenerated pin.
 
-    Readiness graduation must explicitly review this guard with its new
-    evidence; selecting a class or rehashing values cannot qualify a host.
+    The profile pinned here is the ACTIVATED physical one: class
+    `local-pie-ssd`, 100Gi blobs and 4Gi journal, with `deploymentReady: true`.
+    It held the staged reserved-file profile before, on the same terms and for
+    the same reason: a class name, a capacity or a readiness value that moved
+    without this guard moving with it would be caught only as a changed byte
+    pin, which reads as "the boundary changed" rather than naming what changed.
+    Selecting a class or rehashing values still cannot qualify a host, and a
+    profile change still needs its own evidence in front of a reviewer.
     """
     values = values_body(spec_lines)
     keys = bare_keys(values, 4, "obsync values")
-    if keys.get("deploymentReady", (0, ""))[1] != "false":
-        raise ValueError("obsync reserved-file storage must remain not ready")
+    if keys.get("deploymentReady", (0, ""))[1] != "true":
+        raise ValueError("obsync storage must remain ready")
     if "storage" not in keys or keys["storage"][1]:
-        raise ValueError("obsync storage must match the staged reserved-file profile")
+        raise ValueError("obsync storage must match the physical profile")
     storage = block_body(values, keys["storage"][0], 4)
     roles = bare_keys(storage, 6, "obsync storage")
     if set(roles) != {"blobs", "journal"}:
-        raise ValueError("obsync storage must match the staged reserved-file profile")
-    for role, size in (("blobs", "250Gi"), ("journal", "4Gi")):
+        raise ValueError("obsync storage must match the physical profile")
+    for role, size in (("blobs", "100Gi"), ("journal", "4Gi")):
         opener, scalar = roles[role]
         if scalar:
-            raise ValueError("obsync storage must match the staged reserved-file profile")
+            raise ValueError("obsync storage must match the physical profile")
         role_body = block_body(storage, opener, 6)
         if any(len(raw) - len(raw.lstrip(" ")) != 8 for _, raw in role_body
                if raw.strip() and not raw.lstrip().startswith("#")):
-            raise ValueError("obsync storage must match the staged reserved-file profile")
+            raise ValueError("obsync storage must match the physical profile")
         fields = bare_keys(role_body, 8, "obsync storage role")
         actual = {key: rest for key, (_, rest) in fields.items()}
-        if actual != {"capacity": size, "className": "local-pie-ssd-reserved", "size": size}:
-            raise ValueError("obsync storage must match the staged reserved-file profile")
+        if actual != {"capacity": size, "className": "local-pie-ssd", "size": size}:
+            raise ValueError("obsync storage must match the physical profile")
 
 
 def check(root: Path = ROOT) -> tuple[dict, dict]:

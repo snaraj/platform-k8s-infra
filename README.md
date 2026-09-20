@@ -23,14 +23,17 @@ OCI chart source, a Helm release and a default-deny network policy. The active
 applications are naranjo.online, lidersea.com and obsync. Their selected source,
 chart and image bindings are recorded in the [acquisition receipt](docs/assurance/195-chart-acquisition-receipt.json).
 
-`obsync` was composed pending and activated by this change: its publisher cut
-v0.1.4, so the fail-closed sentinel is replaced by the acquired digest, the
-release is unsuspended, and it holds a receipt record like any other active
-application. Its `deploymentReady` value stays `false` — that one describes the
-cluster, not this repository, and selecting a verified chart does not move it.
-At `false` the selected chart still renders its object set and holds the
-Deployment at zero application replicas; the operator's reconciler, created
-suspended, is what keeps any of it from reaching the cluster.
+`obsync` was composed pending, then activated: the fail-closed sentinel was
+replaced by the acquired digest, the release was unsuspended, and it holds a
+receipt record like any other active application. Its `deploymentReady` value
+is now `true` — that one describes the cluster, not this repository, and
+selecting a verified chart never moves it in either direction. It was flipped
+by its own reviewed change against the operator's proven host directories,
+PersistentVolumes and Secret, together with the move from the undeliverable
+`local-pie-ssd-reserved` profile to the existing physical `local-pie-ssd`
+class at 100Gi/4Gi. `scripts/validate.py` pins that profile and the activated
+value by name, so a silent regression fails as a named refusal rather than only
+as a changed byte pin.
 `PENDING_APPLICATIONS` is now empty — the state is unused, not retired, and the
 next application whose publisher has not cut a release enters it. The decision
 admitting obsync is
