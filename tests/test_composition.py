@@ -922,34 +922,34 @@ spec:
                 path.write_text(original)
         composition.check(self.root)
 
-    def test_reserved_storage_stays_staged_with_the_exact_two_claims(self):
+    def test_physical_storage_is_active_with_the_exact_two_claims(self):
         path = self.root / "kubernetes/websites/obsync/release.yaml"
         source = path.read_text()
-        self.assertEqual(source.count("        className: local-pie-ssd-reserved"), 2)
-        self.assertEqual(composition.READY_LINE.findall(source), ["false"])
+        self.assertEqual(source.count("        className: local-pie-ssd"), 2)
+        self.assertEqual(composition.READY_LINE.findall(source), ["true"])
         composition.check(self.root)
 
-    def test_repinning_cannot_enable_or_partially_replace_reserved_storage(self):
+    def test_repinning_cannot_disable_or_partially_replace_physical_storage(self):
         path = self.root / "kubernetes/websites/obsync/release.yaml"
         shapes_path = self.root / "policies/manifest-shapes.json"
         original, original_shapes = path.read_text(), shapes_path.read_text()
         cases = (
-            ("    deploymentReady: false", "    deploymentReady: true", "must remain not ready"),
-            ("    deploymentReady: false", "    deploymentReady: 0", "must remain not ready"),
-            ("    deploymentReady: false\n", "", "must remain not ready"),
-            ("        className: local-pie-ssd-reserved", "        className: local-pie-ssd", "staged reserved-file profile"),
-            ("        className: local-pie-ssd-reserved", "        className: unknown-class", "staged reserved-file profile"),
-            ("      blobs:", "      blob:", "staged reserved-file profile"),
-            ("      journal:", "      journal: []", "staged reserved-file profile"),
-            ("    storage:", "    storage: []", "staged reserved-file profile"),
-            ("        capacity: 250Gi", "        capacity: 249Gi", "staged reserved-file profile"),
-            ("        size: 250Gi", "        size: 251Gi", "staged reserved-file profile"),
-            ("        capacity: 4Gi", "        capacity: 3Gi", "staged reserved-file profile"),
-            ("        size: 4Gi", "        size: 5Gi", "staged reserved-file profile"),
-            ("    storage:\n", "    storage:\n      mirrors: []\n", "staged reserved-file profile"),
-            ("        size: 4Gi", "        size: 4Gi\n        extra: []", "staged reserved-file profile"),
-            ("        size: 4Gi", "        size: 4Gi\n          nested: []", "staged reserved-file profile"),
-            ("        className: local-pie-ssd-reserved\n        size: 4Gi", "        className: other-class\n        size: 4Gi", "staged reserved-file profile"),
+            ("    deploymentReady: true", "    deploymentReady: false", "must remain ready"),
+            ("    deploymentReady: true", "    deploymentReady: 1", "must remain ready"),
+            ("    deploymentReady: true\n", "", "must remain ready"),
+            ("        className: local-pie-ssd", "        className: local-pie-ssd-reserved", "physical profile"),
+            ("        className: local-pie-ssd", "        className: unknown-class", "physical profile"),
+            ("      blobs:", "      blob:", "physical profile"),
+            ("      journal:", "      journal: []", "physical profile"),
+            ("    storage:", "    storage: []", "physical profile"),
+            ("        capacity: 100Gi", "        capacity: 99Gi", "physical profile"),
+            ("        size: 100Gi", "        size: 250Gi", "physical profile"),
+            ("        capacity: 4Gi", "        capacity: 3Gi", "physical profile"),
+            ("        size: 4Gi", "        size: 5Gi", "physical profile"),
+            ("    storage:\n", "    storage:\n      mirrors: []\n", "physical profile"),
+            ("        size: 4Gi", "        size: 4Gi\n        extra: []", "physical profile"),
+            ("        size: 4Gi", "        size: 4Gi\n          nested: []", "physical profile"),
+            ("        className: local-pie-ssd\n        size: 4Gi", "        className: other-class\n        size: 4Gi", "physical profile"),
         )
         for before, after, expected in cases:
             with self.subTest(after=after):
