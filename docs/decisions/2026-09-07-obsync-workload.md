@@ -258,6 +258,13 @@ SUSPENDED and unsuspended only after the storage admission decision and the two
 PersistentVolumes exist; `deploymentReady: false` then keeps the Deployment at
 zero application replicas until a second reviewed change moves it.
 
+**Superseded in part by the amendment of 2026-09-20 (physical binding and
+readiness).** The storage admission decision and both PersistentVolumes exist,
+and the second reviewed change has been made, so this namespace's storage is no
+longer a NO-GO and `deploymentReady` is no longer `false`. What is NOT
+superseded is the reasoning: that value alone never held the line, and the
+operator's suspended reconciler is still what does.
+
 ## 5. The contract state this introduces, and why it is a security review
 
 `PENDING_APPLICATIONS` is a new state inside a security validator, so it is
@@ -304,6 +311,8 @@ binds the proxy. Both cannot hold, and a reviewer said so. The boundary is:
 5. **`deploymentReady: true` is a SECOND one-line reviewed change in this
    repository**, against prerequisites someone confirmed by running the checks.
    It is never batched into a chart selection.
+   **Done by the amendment of 2026-09-20**, together with the physical binding
+   and under the same review; it was not batched into a chart selection.
 6. **The operator lifts the reconciler's suspension.**
 7. **The proxy apply follows**, with the application Service resolvable and the
    peer already bound.
@@ -314,6 +323,12 @@ binds the proxy. Both cannot hold, and a reviewer said so. The boundary is:
 - Fable5.1
 
 ## Amendment: staged reserved-file profile (2026-09-11)
+
+**Superseded by the amendment of 2026-09-20 (physical binding and readiness):
+the class selected here is not activated, and the capacities stated here are
+replaced. Its qualification and migration requirements are not withdrawn — they
+are carried forward there.** The text is kept as the record of what was decided
+on that date.
 
 [Issue #20](https://github.com/snaraj/platform-k8s-infra/issues/20) selects the
 separate `local-pie-ssd-reserved` class for both claims, while retaining
@@ -345,3 +360,66 @@ volumes and application identity until acceptance; never delete claims or
 reduce existing capacity promises to complete the transition.
 
 - Codex
+
+## Amendment: physical binding and readiness (2026-09-20)
+
+[Issue #44](https://github.com/snaraj/platform-k8s-infra/issues/44) binds this
+workload's two claims to the existing physical `local-pie-ssd` profile and
+promotes `deploymentReady` to `true`. It supersedes the class selection of the
+2026-09-11 amendment and the readiness statements of §4 and §6, which are
+marked above rather than removed.
+
+**1. The staged reserved-file profile is not activated.** The class
+`local-pie-ssd-reserved` was selected on 2026-09-11 on the condition that
+platform qualification first prove full file reservation. That qualification
+was never implementable: the extent-evidence collector it depends on, and the
+mechanism that would keep the backing file's allocation from being discarded,
+were never implemented in `snaraj/platform`, and the node's filesystem cannot
+hold a fully allocated backing file of the declared size beside the obligations
+it already carries. The owner ruled on 2026-09-20 that this workload's storage
+remains the physical `local-pie-ssd` profile the two websites already use.
+
+**2. What this workload binds to.** Two static local PersistentVolumes, created
+by the operator out of band and pre-bound to these exact claims by `claimRef`,
+on the existing `local-pie-ssd` class, with node affinity matching `In` the
+cluster's single node: 100Gi for blobs and 4Gi for the journal. The 250Gi of §4
+and of the 2026-09-11 amendment is superseded by 100Gi, an independent decision
+of its own rather than a consequence of the class move. That number is an
+APPLICATION ADMISSION BUDGET, not a filesystem reservation and not a hard
+quota: a local volume ADVERTISES capacity on a filesystem it shares with other
+data, and what bounds what the Pod may write is the claim guarantee together
+with the capacity the server is told. Buying an enforced reservation is exactly
+what the reserved-file profile existed for, and giving that up is what this
+decision costs.
+
+**3. This is an INITIAL binding, not a migration.** When readiness was promoted
+no PersistentVolumeClaim and no HelmRelease existed in the `obsidian` namespace:
+the tenant reconciler was created SUSPENDED as §6 requires and had never
+reconciled, so nothing had ever rendered a claim. The hand-made objects used for
+earlier validation named a different class and were removed under the owner's
+authorization before this binding; they were never this workload's desired
+state. The migration constraints of the 2026-09-11 amendment therefore do not
+bear on this change — there is no bound claim to migrate, no capacity promise to
+reduce, no volume to preserve. They bear fully on what comes after it: once a
+claim exists, a change of its class or its size is a separate reviewed migration
+decision, with a stopped workload, verified recovery and new bindings, and this
+amendment authorizes none of that.
+
+**4. Readiness.** `deploymentReady: true` is the second reviewed change §6 item
+5 requires. It is carried by the same pull request as this binding, under the
+same independent review, and against prerequisites the operator proved under
+their own authorization; it is still never a side effect of selecting a chart,
+in either direction. `scripts/validate.py` pins this exact profile — the class,
+both capacities and the readiness value — independently of the manifest-shape
+hash, so a later profile or readiness change is again something a reviewer has
+to read, and regenerating the byte pin alone carries neither.
+
+**5. The reserved-file profile remains available as a future hardening.** Its
+class stays admitted in the platform's policy and selectable by its own reviewed
+change, under the qualification the 2026-09-11 amendment set out: reservation
+proven through format, restart and trim, exact backing and mount identities, a
+ledger including retained obligations and headroom, non-writable fallback roots,
+ownership and recovery. This amendment neither performs that qualification nor
+relaxes any part of it.
+
+- Opus5
