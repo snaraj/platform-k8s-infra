@@ -29,17 +29,17 @@
       "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.86@sha256:e5a3772a7e84b22e67fd3c5a91ccaad806a776652a3d1df8c57077161d3c8424"
     },
     "obsync": {
-      "arm64Digest": "sha256:7c87ee0b96552a127c49523d3b9f649e8186833e9f50b46c25bd2beb6fe23b9c",
-      "chart": {"appVersion": "1.0.4", "name": "obsync", "version": "1.0.4"},
-      "chartConfigDigest": "sha256:edd739013968811c06a60a436e34b302092cfa27c5cd673122f0f4e46a7664ca",
-      "chartLayerDigest": "sha256:7c681dbaab744f05877ad508776863239ef3bacbad9ed8430b18bf3602292a5c",
+      "arm64Digest": "sha256:b3173600e3b3dcefed7052ef3beea5bbe2387f4a8f0bee852fbb20f08b56d392",
+      "chart": {"appVersion": "1.0.5", "name": "obsync", "version": "1.0.5"},
+      "chartConfigDigest": "sha256:7d55109c717637e3e5771faca552a66916566f9703c0bcfbc4c2d9e4c278b861",
+      "chartLayerDigest": "sha256:9737fb19eede4dba1f3deb97e3997eb7bd242dc62e2a747dec7203ccd714ffbe",
       "chartRepository": "ghcr.io/snaraj/charts/obsync",
-      "chartTag": "1.0.4",
-      "manifestDigest": "sha256:3b10a5202d2244b5c8f5e2863aa8f86f33fa1f38c678e004d77f9b64d1c6f477",
+      "chartTag": "1.0.5",
+      "manifestDigest": "sha256:e4848758d9a0cd9d4206d8008ee708be08a703b0164a2f84214a72f593a24f4c",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:a53c8b4fccf9c6dd7dbf4395de850fe99881920b719e28b1c4ede0c55fe10450", "sourceSha": "c5840be5041f3ffce513d6598c3c9dea86afa0fe"},
+      "release": {"assetDigest": "sha256:5d344d2d6f2b67d173ec3fd965a5e90310a433ab88bf6c647de775e6658a1569", "sourceSha": "a2c11ab3ef74afb97640d4d528255f8eb035b97e"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/obsync/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/obsync:v1.0.4@sha256:4946d5d29bcd69bccea510efe5696b67711401ad215147cd907bc115a1b1dc4c"
+      "workloadImage": "ghcr.io/snaraj/obsync:v1.0.5@sha256:25f23d08e7093db432f0fbdd4eb3a2b30f3f17daf584fe538ec3831824587275"
     }
   },
   "schema": "dev.snaraj.chart-acquisition-receipt/v2",
