@@ -1,32 +1,32 @@
 {
   "chartLayerMediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-  "capturedDate": "2026-09-21",
+  "capturedDate": "2026-09-22",
   "records": {
     "lidersea-com": {
-      "arm64Digest": "sha256:e6c2055c7b29d626dd6f574b44118c72e7b6f0368a2614a2a3e7572e156a2e83",
-      "chart": {"appVersion": "0.1.46", "name": "lidersea-com", "version": "0.1.46"},
-      "chartConfigDigest": "sha256:460d6c045f5cc356790adc65b28d958620b3911b68962e0c01b487acfce85760",
-      "chartLayerDigest": "sha256:77859778993ff0269da6f12ece89f01e49ae3a3898b01296e49a32d648e88b3c",
+      "arm64Digest": "sha256:51a2c5a282b6c8ecb7f313804a5cd745a7322cd77246d7e222bb7ff3f026f9d3",
+      "chart": {"appVersion": "0.1.48", "name": "lidersea-com", "version": "0.1.48"},
+      "chartConfigDigest": "sha256:c36404475409dc6afaaca009ee2487b9b82c10629d0e5b99c9604ce04b85acae",
+      "chartLayerDigest": "sha256:3a36b765a62210a9ed9e2fba08f3ac85545252c81ac29539ac185d8b39e34d64",
       "chartRepository": "ghcr.io/snaraj/charts/lidersea-com",
-      "chartTag": "0.1.46",
-      "manifestDigest": "sha256:10b99a74d91f87dcc2733be70c2b1f6a7b6ddb74addaf1a6192943112f6190d6",
+      "chartTag": "0.1.48",
+      "manifestDigest": "sha256:c2faa2a3403dcea0aa217c07d4c7fa17a0da0ca9e06def65323cc8e8fab930a2",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:630477a0f7930c82ba6202c484df9e5f0e3309facfc0d0c68e264ac61f590b23", "sourceSha": "a85359553e6de602e6e95c3a04815d608df44df5"},
+      "release": {"assetDigest": "sha256:ef1afe64a2c2d6ef44c48743dbe46920b2477cc0308421337c42ead9f1515034", "sourceSha": "eda34eb04e6e5f2f53cf232c8184aa33493ae1d9"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/lidersea.com/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.46@sha256:d95686399a00fa6a127f39afc5ee31d5f7f86f459113de05fb05cf691d037864"
+      "workloadImage": "ghcr.io/snaraj/lidersea-com:v0.1.48@sha256:703de55a8dcaeeafd0dd2dd6f4134957196bf199f44e04962a8beb39237d9564"
     },
     "naranjo-online": {
-      "arm64Digest": "sha256:716158b45f4cef15d5d4f679560675cdafad4da9ec3603ca4351f4cec6271a83",
-      "chart": {"appVersion": "0.1.86", "name": "naranjo-online", "version": "0.1.86"},
-      "chartConfigDigest": "sha256:8119686df9f32ea1b824f89e95b3e561a3b0956eb4693229151f00919b49cadb",
-      "chartLayerDigest": "sha256:82cd1503d5baff777cef6dde626fce9ca0979cce63d97aa6e7a01909e95bcec9",
+      "arm64Digest": "sha256:9a8f1c4657ede07e68bab0940446293b0b06303797b26948f4b31585704a72eb",
+      "chart": {"appVersion": "0.1.88", "name": "naranjo-online", "version": "0.1.88"},
+      "chartConfigDigest": "sha256:2b7995c8f52184eb511395f7efab23d7b8aea81a288470d8fb3df699167bc9c5",
+      "chartLayerDigest": "sha256:cba8336021e8bab87f75e077daf349117fab73ace3374be9b91b886c6c2ca47f",
       "chartRepository": "ghcr.io/snaraj/charts/naranjo-online",
-      "chartTag": "0.1.86",
-      "manifestDigest": "sha256:a75e5a347b6e8c7d0d86a2a3d05cc5813181cc6c5e7c8c08687ced054fc142a3",
+      "chartTag": "0.1.88",
+      "manifestDigest": "sha256:6dd1b41927e58d13dbcea454127cf9393888324bd8845d7ff6433811d5db56b7",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:bb7f13d84b7b98f73b1e3d6154d0efa8a35808b29817167bd148a1ca31dd664b", "sourceSha": "ce8f827e943e5c7317098a05cbcc589007c2426b"},
+      "release": {"assetDigest": "sha256:d93dff38749e7208bd8df55bc69404c3d40de57b0f762478f710a9520a0c10c2", "sourceSha": "e7c52721cc85b92223fa6840742e09c8c7b1f0ba"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/naranjo.online/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.86@sha256:e5a3772a7e84b22e67fd3c5a91ccaad806a776652a3d1df8c57077161d3c8424"
+      "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.88@sha256:7e1cdad2bb0e48966251accecd07b0d45b6da42e912acfadbb76acec838ddd32"
     },
     "obsync": {
       "arm64Digest": "sha256:70edcf0560994cf5d00ab63910d9cd966fd3a3bad33d8fe904fb76de16a984c6",

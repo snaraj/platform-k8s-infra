@@ -48,7 +48,7 @@ apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   annotations:
-    platform.snaraj.dev/chart-release: "0.1.46"
+    platform.snaraj.dev/chart-release: "0.1.48"
   name: lidersea-com-chart
   namespace: lidersea-com
 spec:
@@ -57,7 +57,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    digest: sha256:10b99a74d91f87dcc2733be70c2b1f6a7b6ddb74addaf1a6192943112f6190d6
+    digest: sha256:c2faa2a3403dcea0aa217c07d4c7fa17a0da0ca9e06def65323cc8e8fab930a2
   timeout: 60s
   url: oci://ghcr.io/snaraj/charts/lidersea-com
   verify:
