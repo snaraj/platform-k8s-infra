@@ -1,6 +1,6 @@
 {
   "chartLayerMediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
-  "capturedDate": "2026-09-22",
+  "capturedDate": "2026-09-23",
   "records": {
     "lidersea-com": {
       "arm64Digest": "sha256:51a2c5a282b6c8ecb7f313804a5cd745a7322cd77246d7e222bb7ff3f026f9d3",
@@ -29,17 +29,17 @@
       "workloadImage": "ghcr.io/snaraj/naranjo-online:v0.1.88@sha256:7e1cdad2bb0e48966251accecd07b0d45b6da42e912acfadbb76acec838ddd32"
     },
     "obsync": {
-      "arm64Digest": "sha256:70edcf0560994cf5d00ab63910d9cd966fd3a3bad33d8fe904fb76de16a984c6",
-      "chart": {"appVersion": "1.0.6", "name": "obsync", "version": "1.0.6"},
-      "chartConfigDigest": "sha256:c10034f4e43050ed31ed8e6d02a2fb2495b8b5e40672a6b2ac9655a16f1f57ca",
-      "chartLayerDigest": "sha256:0027c5e3fc92fe387eabb540285954b978e2c81defa1346c0f753b849e0c22ea",
+      "arm64Digest": "sha256:d3d11812a8caa1204eae2128c5df3f5e9c51fb5fe88c4a31e880ccafa02ae28e",
+      "chart": {"appVersion": "1.1.0", "name": "obsync", "version": "1.1.0"},
+      "chartConfigDigest": "sha256:d58c6889792fc7aa0340f0627d7d8aa6dbfc3585e51cdaa5beb188bc202954eb",
+      "chartLayerDigest": "sha256:3631ab58f36ed90573d80237f87a2080e037c593a844bdae35813d5500af96d3",
       "chartRepository": "ghcr.io/snaraj/charts/obsync",
-      "chartTag": "1.0.6",
-      "manifestDigest": "sha256:204b5078cc17f20c7457e6eab03e53e40c86b10930509f221e1e9669e9c79e3b",
+      "chartTag": "1.1.0",
+      "manifestDigest": "sha256:5e0fc92b2d34d55d39ddbf86c27fba2d61c410ba8dd65f7258f1269d2b3b808a",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:c9a5423b925ab40005706aeaa1e9b8bbc6baa3f2ee3f44b56621152fc4dcf5d8", "sourceSha": "311176f79f4cc9380fbabb5c29e504bd9875e9b3"},
+      "release": {"assetDigest": "sha256:fbab81c5a2ea4b1afbefce7097776005c940353bee66061abde688cd5f2933e1", "sourceSha": "b7e07877a96dfaba7183c7cd4d1e041fad5357e0"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/obsync/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/obsync:v1.0.6@sha256:45583060c2ba1323fb65c70817b5e3048c01269d71520991bb928040ac9dcee6"
+      "workloadImage": "ghcr.io/snaraj/obsync:v1.1.0@sha256:f581f146eef941ec6a80f4e4e6ee28099c10df9dd2c1cfa8d9d1b7f0eae3d753"
     }
   },
   "schema": "dev.snaraj.chart-acquisition-receipt/v2",
