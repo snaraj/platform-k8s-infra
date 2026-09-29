@@ -599,13 +599,19 @@ def github_release_tag(repository: str, version: str) -> str:
 
 OBSYNC_PLUGIN_FILES = {"main.js": "application/javascript", "manifest.json": "application/json", "styles.css": "text/css"}
 OBSYNC_PLUGIN_MAX_BYTES = 16 * 1024 * 1024
+# The producer publishes one server archive per image platform from 1.1.4 and
+# declares none before it; its size ceiling is the producer's.
+OBSYNC_SERVER_ARCHIVES_FROM = (1, 1, 4)
+OBSYNC_SERVER_PLATFORMS = ("linux/amd64", "linux/arm64")
+OBSYNC_SERVER_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
 
 
 def bind_obsync_release(asset: dict, version: str, tag: str, release: dict, asset_bytes: bytes) -> None:
     """Check version-closed evidence and native asset metadata, not installed bytes.
 
     Chart/image acquisition still verifies its own bytes and signatures. Native
-    file byte equality and installation belong to the producer and device gates.
+    file and server archive byte equality, contents and installation belong to
+    the producer and device gates.
     """
     native = tag == version
     schema = "https://github.com/snaraj/obsync/schemas/release-manifest/v" + ("2" if native else "1")
@@ -638,6 +644,22 @@ def bind_obsync_release(asset: dict, version: str, tag: str, release: dict, asse
         expected[name] = dict(record)
     if total > OBSYNC_PLUGIN_MAX_BYTES:
         raise Refusal("obsync native files exceed the producer's expanded bundle limit")
+    archives = artifacts.get("server_archives")
+    if tuple(map(int, version.split("."))) < OBSYNC_SERVER_ARCHIVES_FROM:
+        if "server_archives" in artifacts:
+            raise Refusal("obsync server archives are declared before the producer publishes them")
+        archives = {}
+    elif not isinstance(archives, dict) or set(archives) != set(OBSYNC_SERVER_PLATFORMS):
+        raise Refusal("obsync server archive inventory is not exact")
+    server_names = set()
+    for platform, record in archives.items():
+        name = f"obsync-server-{tag}-{platform.replace('/', '-')}.tar.gz"
+        if (not isinstance(record, dict) or set(record) != {"name", "digest", "size"}
+                or record.get("name") != name or type(record.get("size")) is not int
+                or not 0 < record["size"] <= OBSYNC_SERVER_ARCHIVE_MAX_BYTES):
+            raise Refusal("obsync server archive metadata is invalid")
+        expected[name] = {"digest": record["digest"], "size": record["size"], "content_type": "application/gzip"}
+        server_names.add(name)
     for record in expected.values():
         digest = record["digest"]
         if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None or digest == "sha256:" + "0" * 64:
@@ -653,8 +675,9 @@ def bind_obsync_release(asset: dict, version: str, tag: str, release: dict, asse
         if name not in expected or name in seen:
             raise Refusal("obsync native release asset name is foreign or duplicated")
         seen.add(name)
+        bound = OBSYNC_SERVER_ARCHIVE_MAX_BYTES if name in server_names else OBSYNC_PLUGIN_MAX_BYTES
         if (record.get("state") != "uploaded" or type(record.get("size")) is not int
-                or not 0 < record["size"] <= OBSYNC_PLUGIN_MAX_BYTES
+                or not 0 < record["size"] <= bound
                 or record.get("browser_download_url") != f"https://github.com/snaraj/obsync/releases/download/{tag}/{name}"):
             raise Refusal("obsync native release asset is not a bounded exact uploaded asset")
         if any(record.get(field) != value for field, value in expected[name].items()):
