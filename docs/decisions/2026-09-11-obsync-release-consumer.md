@@ -14,8 +14,19 @@ digest, signer, annotated source tag and protected-main ancestry checks. For v2,
 the native file map is exactly `main.js`, `manifest.json`, `styles.css`; each
 record has a SHA-256 digest, positive bounded integer size and exact content
 type. The retained bundle declaration has the versioned bare-tag filename and
-three-file contents. The immutable release must carry the exact five assets,
-with uploaded state, source-bound URLs and metadata matching the evidence.
+three-file contents. The immutable release must carry exactly those five assets,
+plus the two server archives from 1.1.4, with uploaded state, source-bound URLs
+and metadata matching the evidence.
+
+Amended 2026-09-29: from 1.1.4 the producer also publishes one server archive per
+image platform and declares them under `artifacts.server_archives`, keyed by
+exactly `linux/amd64` and `linux/arm64`, each record exactly `name`, `digest` and
+`size`. Acquisition requires that declaration from 1.1.4 and refuses it before.
+Each name is the producer's `obsync-server-X.Y.Z-linux-<arch>.tar.gz`, each size
+a positive integer within the producer's 64 MiB ceiling, and each uploaded asset
+carries `application/gzip` with the declared digest and size. As with the native
+files, this consumer never downloads, unpacks or runs an archive; the cluster
+runs the signed image.
 
 This consumer verifies native asset metadata only. It does not download or
 execute the native files, validate their archive contents, prove catalog

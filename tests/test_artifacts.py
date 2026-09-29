@@ -231,6 +231,8 @@ class ObsSyncFleet(FakeFleet):
             "manifest.json": (json.dumps({"id": "obsync", "version": version}).encode(), "application/json"),
             "styles.css": (b"synthetic style", "text/css"),
         }
+        self.server_archives = {} if tuple(map(int, version.split("."))) < (1, 1, 4) else {
+            platform: b"synthetic server " + platform.encode() for platform in ("linux/amd64", "linux/arm64")}
         super().__init__("obsync", "snaraj/obsync", version, "obsync")
 
     def release_manifest(self):
@@ -245,6 +247,11 @@ class ObsSyncFleet(FakeFleet):
             result["artifacts"]["plugin_files"] = {name: {
                 "digest": sha(body), "size": len(body), "content_type": content_type,
             } for name, (body, content_type) in self.native_files.items()}
+        if self.server_archives:
+            result["artifacts"]["server_archives"] = {platform: {
+                "name": f"obsync-server-{self.release_tag}-{platform.replace('/', '-')}.tar.gz",
+                "digest": sha(body), "size": len(body),
+            } for platform, body in self.server_archives.items()}
         return result
 
     def build(self):
@@ -266,6 +273,9 @@ class ObsSyncFleet(FakeFleet):
             records = {artifact["plugin_bundle"]["name"]: {
                 "digest": artifact["plugin_bundle"]["digest"], "size": 42, "content_type": "application/zip"},
                 **artifact["plugin_files"]}
+            for archive in artifact.get("server_archives", {}).values():
+                records[archive["name"]] = {"digest": archive["digest"], "size": archive["size"],
+                                            "content_type": "application/gzip"}
             for name, record in records.items():
                 self.release["assets"].append({**record, "name": name, "state": "uploaded",
                     "browser_download_url": f"https://github.com/{self.site}/releases/download/{self.release_tag}/{name}"})
@@ -276,10 +286,13 @@ class ObsSyncFleet(FakeFleet):
         self.downloads[self.asset_url] = self.asset_bytes
         self.release["assets"][0].update(digest=self.asset_digest, size=len(self.asset_bytes))
         if mirror:
+            archives = {archive["name"]: archive for archive in asset["artifacts"].get("server_archives", {}).values()}
             for record in self.release["assets"][1:]:
                 file = asset["artifacts"].get("plugin_files", {}).get(record["name"])
                 if isinstance(file, dict):
                     record.update(file)
+                elif record["name"] in archives:
+                    record.update(digest=archives[record["name"]]["digest"], size=archives[record["name"]]["size"])
                 elif record["name"].endswith(".zip"):
                     record["digest"] = asset["artifacts"]["plugin_bundle"]["digest"]
 
@@ -302,7 +315,7 @@ class ObsSyncReleaseTests(unittest.TestCase):
             self.assertEqual(MODULE.github_release_tag(repository, "0.1.11"), "v0.1.11")
 
     def test_legacy_and_native_versions_bind_distinct_release_and_image_tags(self):
-        for version in ("0.1.9", "0.1.10", "0.1.11", "0.1.12", "0.2.0", "1.0.0"):
+        for version in ("0.1.9", "0.1.10", "0.1.11", "0.1.12", "0.2.0", "1.0.0", "1.1.3", "1.1.4", "2.0.0"):
             with self.subTest(version=version):
                 fleet = ObsSyncFleet(version)
                 record, _ = fleet.acquire()
@@ -416,6 +429,99 @@ class ObsSyncReleaseTests(unittest.TestCase):
                     fleet.acquire()
         fleet = ObsSyncFleet(); fleet.release["assets"][2]["size"] += 1
         with self.assertRaisesRegex(MODULE.Refusal, "metadata contradicts"): fleet.acquire()
+
+    def test_server_archives_are_exact_from_the_first_release_that_publishes_them(self):
+        amd64, arm64 = "linux/amd64", "linux/arm64"
+        for version in ("1.1.4", "2.0.0"):
+            fleet = ObsSyncFleet(version)
+            names = sorted(record["name"] for record in fleet.release["assets"])
+            self.assertIn(f"obsync-server-{version}-linux-amd64.tar.gz", names)
+            self.assertIn(f"obsync-server-{version}-linux-arm64.tar.gz", names)
+            self.assertEqual(len(names), 7)
+        for value in (None, [], {}, "x", {amd64: {}}, {"linux/arm/v7": {}, amd64: {}, arm64: {}}):
+            fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest()
+            archives = asset["artifacts"]["server_archives"]
+            if isinstance(value, dict) and value:
+                value = {platform: archives.get(platform, archives[amd64]) for platform in value}
+            asset["artifacts"]["server_archives"] = value; fleet.replace_evidence(asset)
+            with self.subTest(archives=value), self.assertRaisesRegex(MODULE.Refusal, "server archive inventory"):
+                fleet.acquire()
+        fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest(); del asset["artifacts"]["server_archives"]
+        fleet.replace_evidence(asset)
+        with self.assertRaisesRegex(MODULE.Refusal, "server archive inventory"): fleet.acquire()
+        for platform in (amd64, arm64):
+            other = arm64 if platform == amd64 else amd64
+            for field, value, reason in (
+                ("name", f"obsync-server-v1.1.4-{platform.replace('/', '-')}.tar.gz", "archive metadata"),
+                ("name", f"obsync-server-1.1.4-{other.replace('/', '-')}.tar.gz", "archive metadata"),
+                ("name", None, "archive metadata"),
+                ("size", True, "archive metadata"), ("size", 1.0, "archive metadata"),
+                ("size", 0, "archive metadata"), ("size", 64 * 1024 * 1024 + 1, "archive metadata"),
+                ("content_type", "application/gzip", "archive metadata"), ("extra", True, "archive metadata"),
+                ("digest", "sha256:" + "0" * 64, "asset digest"), ("digest", "wrong", "asset digest"),
+                ("digest", None, "asset digest"),
+            ):
+                fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest()
+                asset["artifacts"]["server_archives"][platform][field] = value
+                fleet.replace_evidence(asset, mirror=True)
+                with self.subTest(platform=platform, field=field, value=value), \
+                        self.assertRaisesRegex(MODULE.Refusal, reason):
+                    fleet.acquire()
+            for field in ("name", "digest", "size"):
+                fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest()
+                del asset["artifacts"]["server_archives"][platform][field]; fleet.replace_evidence(asset)
+                with self.subTest(platform=platform, missing=field), \
+                        self.assertRaisesRegex(MODULE.Refusal, "archive metadata"):
+                    fleet.acquire()
+            for value in (None, [], "x"):
+                fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest()
+                asset["artifacts"]["server_archives"][platform] = value; fleet.replace_evidence(asset)
+                with self.subTest(platform=platform, record=value), \
+                        self.assertRaisesRegex(MODULE.Refusal, "archive metadata"):
+                    fleet.acquire()
+
+    def test_server_archives_are_refused_before_the_producer_publishes_them(self):
+        for version in ("0.1.11", "1.0.0", "1.1.3"):
+            for value in (None, {}, ObsSyncFleet("1.1.4").release_manifest()["artifacts"]["server_archives"]):
+                fleet = ObsSyncFleet(version); asset = fleet.release_manifest()
+                asset["artifacts"]["server_archives"] = value; fleet.replace_evidence(asset)
+                with self.subTest(version=version, archives=value), \
+                        self.assertRaisesRegex(MODULE.Refusal, "declared before"):
+                    fleet.acquire()
+
+    def test_server_archive_release_assets_are_bound_to_their_evidence(self):
+        archive_indexes = range(5, 7)
+        for index in archive_indexes:
+            for field, value, reason in (
+                ("state", "new", "uploaded asset"), ("size", 0, "uploaded asset"),
+                ("size", 64 * 1024 * 1024 + 1, "uploaded asset"),
+                ("browser_download_url", "https://example.invalid/asset", "outside|uploaded asset"),
+                ("content_type", "application/octet-stream", "metadata contradicts"),
+                ("digest", "sha256:" + "f" * 64, "GitHub states|metadata contradicts"),
+            ):
+                fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"][index][field] = value
+                with self.subTest(index=index, field=field), self.assertRaisesRegex(MODULE.Refusal, reason):
+                    fleet.acquire()
+            fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"][index]["size"] += 1
+            with self.subTest(index=index, size="drift"), self.assertRaisesRegex(MODULE.Refusal, "metadata contradicts"):
+                fleet.acquire()
+            fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"].pop(index)
+            with self.subTest(index=index, removed=True), self.assertRaisesRegex(MODULE.Refusal, "asset inventory"):
+                fleet.acquire()
+        # The archive ceiling is the producer's, not the plugin's: a plugin-sized
+        # bound would refuse a legitimate archive, and the exact ceiling passes.
+        for size in (16 * 1024 * 1024 + 1, 64 * 1024 * 1024):
+            fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest()
+            asset["artifacts"]["server_archives"]["linux/arm64"]["size"] = size
+            fleet.replace_evidence(asset, mirror=True)
+            with self.subTest(size=size):
+                self.assertEqual(fleet.acquire()[0]["release"]["assetDigest"], fleet.asset_digest)
+        fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"][1]["size"] = 16 * 1024 * 1024 + 1
+        with self.assertRaisesRegex(MODULE.Refusal, "uploaded asset"): fleet.acquire()
+        fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"].append(dict(fleet.release["assets"][5]))
+        with self.assertRaisesRegex(MODULE.Refusal, "asset inventory"): fleet.acquire()
+        fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"][6] = dict(fleet.release["assets"][5])
+        with self.assertRaisesRegex(MODULE.Refusal, "asset name"): fleet.acquire()
 
     def test_native_tag_identity_and_protected_source_bindings_remain_required(self):
         for path in (("release", "tag"), ("artifacts", "image", "tag")):
