@@ -604,22 +604,28 @@ OBSYNC_PLUGIN_MAX_BYTES = 16 * 1024 * 1024
 OBSYNC_SERVER_ARCHIVES_FROM = (1, 1, 4)
 OBSYNC_SERVER_PLATFORMS = ("linux/amd64", "linux/arm64")
 OBSYNC_SERVER_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
+OBSYNC_CLI_FROM = (1, 2, 0)
+OBSYNC_CLI_MAX_BYTES = 4 * 1024 * 1024
+OBSYNC_CLI_RUNTIME = {"name": "node", "version": "26.10.0", "delivery": "prerequisite"}
 
 
 def bind_obsync_release(asset: dict, version: str, tag: str, release: dict, asset_bytes: bytes) -> None:
     """Check version-closed evidence and native asset metadata, not installed bytes.
 
     Chart/image acquisition still verifies its own bytes and signatures. Native
-    file and server archive byte equality, contents and installation belong to
+    file, CLI and server archive byte equality, contents and installation belong to
     the producer and device gates.
     """
     native = tag == version
     schema = "https://github.com/snaraj/obsync/schemas/release-manifest/v" + ("2" if native else "1")
     if asset.get("schema") != schema:
         raise Refusal("obsync release evidence schema does not match its version")
+    artifacts = asset.get("artifacts") or {}
+    cli_required = tuple(map(int, version.split("."))) >= OBSYNC_CLI_FROM
+    if not cli_required and "cli_bundle" in artifacts:
+        raise Refusal("obsync CLI bundle is declared before the producer publishes it")
     if not native:
         return
-    artifacts = asset.get("artifacts") or {}
     bundle = artifacts.get("plugin_bundle")
     files = artifacts.get("plugin_files")
     bundle_name = f"obsync-plugin-{tag}.zip"
@@ -660,6 +666,18 @@ def bind_obsync_release(asset: dict, version: str, tag: str, release: dict, asse
             raise Refusal("obsync server archive metadata is invalid")
         expected[name] = {"digest": record["digest"], "size": record["size"], "content_type": "application/gzip"}
         server_names.add(name)
+    if cli_required:
+        cli = artifacts.get("cli_bundle")
+        if (not isinstance(cli, dict)
+                or set(cli) != {"name", "digest", "size", "content_type", "runtime", "manifest_sha256"}
+                or cli.get("name") != f"obsync-cli-{version}.zip"
+                or type(cli.get("size")) is not int or not 0 < cli["size"] <= OBSYNC_CLI_MAX_BYTES
+                or cli.get("content_type") != "application/zip" or cli.get("runtime") != OBSYNC_CLI_RUNTIME
+                or not isinstance(cli.get("manifest_sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", cli["manifest_sha256"]) is None
+                or cli["manifest_sha256"] == "0" * 64):
+            raise Refusal("obsync CLI bundle metadata is not exact")
+        expected[cli["name"]] = {field: cli[field] for field in ("digest", "size", "content_type")}
     for record in expected.values():
         digest = record["digest"]
         if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None or digest == "sha256:" + "0" * 64:
