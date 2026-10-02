@@ -15,8 +15,8 @@ the native file map is exactly `main.js`, `manifest.json`, `styles.css`; each
 record has a SHA-256 digest, positive bounded integer size and exact content
 type. The retained bundle declaration has the versioned bare-tag filename and
 three-file contents. The immutable release must carry exactly those five assets,
-plus the two server archives from 1.1.4, with uploaded state, source-bound URLs
-and metadata matching the evidence.
+plus the two server archives from 1.1.4 and CLI bundle from 1.2.0, with uploaded
+state, source-bound URLs and metadata matching the evidence.
 
 Amended 2026-09-29: from 1.1.4 the producer also publishes one server archive per
 image platform and declares them under `artifacts.server_archives`, keyed by
@@ -28,9 +28,22 @@ carries `application/gzip` with the declared digest and size. As with the native
 files, this consumer never downloads, unpacks or runs an archive; the cluster
 runs the signed image.
 
+Amended 2026-10-02: from 1.2.0, `artifacts.cli_bundle` is required, with exactly
+`name`, `digest`, `size`, `content_type`, `runtime` and `manifest_sha256`.
+Its name is `obsync-cli-X.Y.Z.zip`, digest is a nonzero `sha256:` value, size is
+a positive integer at most 4 MiB, and content type is `application/zip`.
+The runtime object is exactly
+`{"name":"node","version":"26.10.0","delivery":"prerequisite"}`; the package
+manifest hash is nonzero lowercase SHA-256 without a prefix. Before 1.2.0,
+including legacy evidence, the CLI declaration is refused. Its uploaded ZIP
+is the eighth asset, bound to the declared name, digest, size, type and exact
+release URL by the existing closed inventory checks. Node is a prerequisite;
+this metadata does not claim that a runtime is embedded or installed.
+
 This consumer verifies native asset metadata only. It does not download or
-execute the native files, validate their archive contents, prove catalog
-availability, or claim successful device installation. Those remain producer
+execute the native files or CLI ZIP, validate their archive contents or native
+attestations, prove catalog availability, or claim successful device
+installation. Those remain producer
 and device acceptance gates. The composition receipt continues to record the
 verified chart/image and release-evidence digest; its format is unchanged.
 
