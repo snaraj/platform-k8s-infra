@@ -252,13 +252,13 @@ class ObsSyncFleet(FakeFleet):
                 "name": f"obsync-server-{self.release_tag}-{platform.replace('/', '-')}.tar.gz",
                 "digest": sha(body), "size": len(body),
             } for platform, body in self.server_archives.items()}
-        if tuple(map(int, self.version.split("."))) >= (1, 2, 0):
-            result["artifacts"]["cli_bundle"] = {
-                "name": f"obsync-cli-{self.version}.zip", "digest": sha(b"synthetic CLI bundle"),
+        if tuple(map(int, self.version.split("."))) >= (1, 1, 6):
+            result["artifacts"]["cli_archives"] = {platform: {
+                "name": f"obsync-cli-{self.version}-{platform}.zip", "digest": sha(b"synthetic native CLI"),
                 "size": 42, "content_type": "application/zip",
-                "runtime": {"name": "node", "version": "26.10.0", "delivery": "prerequisite"},
+                "runtime": {"name": "native-rust", "version": "1.98.0", "delivery": "included"},
                 "manifest_sha256": hashlib.sha256(b"synthetic package manifest").hexdigest(),
-            }
+            } for platform in ("linux-amd64", "linux-arm64", "darwin-arm64", "windows-amd64")}
         return result
 
     def build(self):
@@ -283,7 +283,7 @@ class ObsSyncFleet(FakeFleet):
             for archive in artifact.get("server_archives", {}).values():
                 records[archive["name"]] = {"digest": archive["digest"], "size": archive["size"],
                                             "content_type": "application/gzip"}
-            if cli := artifact.get("cli_bundle"):
+            for cli in artifact.get("cli_archives", {}).values():
                 records[cli["name"]] = {field: cli[field] for field in ("digest", "size", "content_type")}
             for name, record in records.items():
                 self.release["assets"].append({**record, "name": name, "state": "uploaded",
@@ -296,14 +296,15 @@ class ObsSyncFleet(FakeFleet):
         self.release["assets"][0].update(digest=self.asset_digest, size=len(self.asset_bytes))
         if mirror:
             archives = {archive["name"]: archive for archive in asset["artifacts"].get("server_archives", {}).values()}
+            clients = {cli["name"]: cli for cli in asset["artifacts"].get("cli_archives", {}).values()}
             for record in self.release["assets"][1:]:
                 file = asset["artifacts"].get("plugin_files", {}).get(record["name"])
                 if isinstance(file, dict):
                     record.update(file)
                 elif record["name"] in archives:
                     record.update(digest=archives[record["name"]]["digest"], size=archives[record["name"]]["size"])
-                elif record["name"] == asset["artifacts"].get("cli_bundle", {}).get("name"):
-                    record.update({field: asset["artifacts"]["cli_bundle"][field] for field in ("digest", "size", "content_type")})
+                elif record["name"] in clients:
+                    record.update({field: clients[record["name"]][field] for field in ("digest", "size", "content_type")})
                 elif record["name"].endswith(".zip"):
                     record["digest"] = asset["artifacts"]["plugin_bundle"]["digest"]
 
@@ -448,7 +449,7 @@ class ObsSyncReleaseTests(unittest.TestCase):
             names = sorted(record["name"] for record in fleet.release["assets"])
             self.assertIn(f"obsync-server-{version}-linux-amd64.tar.gz", names)
             self.assertIn(f"obsync-server-{version}-linux-arm64.tar.gz", names)
-            self.assertEqual(len(names), 7 if version == "1.1.4" else 8)
+            self.assertEqual(len(names), 7 if version == "1.1.4" else 11)
         for value in (None, [], {}, "x", {amd64: {}}, {"linux/arm/v7": {}, amd64: {}, arm64: {}}):
             fleet = ObsSyncFleet("1.1.4"); asset = fleet.release_manifest()
             archives = asset["artifacts"]["server_archives"]
@@ -534,41 +535,52 @@ class ObsSyncReleaseTests(unittest.TestCase):
         fleet = ObsSyncFleet("1.1.4"); fleet.release["assets"][6] = dict(fleet.release["assets"][5])
         with self.assertRaisesRegex(MODULE.Refusal, "asset name"): fleet.acquire()
 
-    def test_cli_bundle_is_required_from_1_2_0_and_refused_before_it(self):
-        for version in ("1.2.0", "1.2.1", "2.0.0"):
+    def test_cli_archives_are_required_from_1_1_6_and_refused_before_it(self):
+        for version in ("1.1.6", "1.1.7", "1.1.10", "1.2.0", "2.0.0"):
             fleet = ObsSyncFleet(version)
-            self.assertEqual(len(fleet.release["assets"]), 8)
+            self.assertEqual(len(fleet.release["assets"]), 11)
             self.assertEqual(fleet.acquire()[0], fleet.expected_record())
             fetched = [call for call in fleet.calls if call[0] == "fetch" and "/releases/download/" in call[1]]
-            self.assertEqual(fetched, [("fetch", fleet.asset_url)], "CLI ZIP must not be fetched")
-            asset = fleet.release_manifest(); cli = asset["artifacts"].pop("cli_bundle")
-            fleet.release["assets"] = [record for record in fleet.release["assets"] if record["name"] != cli["name"]]
+            self.assertEqual(fetched, [("fetch", fleet.asset_url)], "CLI ZIPs must not be fetched")
+            asset = fleet.release_manifest(); clients = asset["artifacts"].pop("cli_archives")
+            fleet.release["assets"] = [record for record in fleet.release["assets"] if record["name"] not in {c["name"] for c in clients.values()}]
             fleet.replace_evidence(asset)
-            with self.subTest(version=version), self.assertRaisesRegex(MODULE.Refusal, "CLI bundle metadata"):
+            with self.subTest(version=version), self.assertRaisesRegex(MODULE.Refusal, "CLI archive inventory"):
                 fleet.acquire()
-        declaration = ObsSyncFleet("1.2.0").release_manifest()["artifacts"]["cli_bundle"]
-        for version in ("0.1.10", "0.1.11", "1.1.3", "1.1.4", "1.1.6", "1.1.99"):
-            for value in (None, {}, declaration):
-                fleet = ObsSyncFleet(version); asset = fleet.release_manifest()
-                asset["artifacts"]["cli_bundle"] = value; fleet.replace_evidence(asset)
-                with self.subTest(version=version, value=value), self.assertRaisesRegex(MODULE.Refusal, "declared before"):
-                    fleet.acquire()
-
-    def test_cli_bundle_metadata_is_closed_and_bounded(self):
+        for version in ("0.1.10", "0.1.11", "1.1.3", "1.1.4", "1.1.5"):
+            fleet = ObsSyncFleet(version)
+            self.assertEqual(fleet.acquire()[0], fleet.expected_record())
+            for key in ("cli_archives", "cli_bundle"):
+                for value in (None, {}):
+                    fleet = ObsSyncFleet(version); asset = fleet.release_manifest()
+                    asset["artifacts"][key] = value; fleet.replace_evidence(asset)
+                    with self.subTest(version=version, key=key), self.assertRaises(MODULE.Refusal): fleet.acquire()
+        for key in ("linux-amd64", "linux-arm64", "darwin-arm64", "windows-amd64", "foreign"):
+            fleet = ObsSyncFleet("1.1.6"); asset = fleet.release_manifest()
+            if key == "foreign": asset["artifacts"]["cli_archives"][key] = {}
+            else: del asset["artifacts"]["cli_archives"][key]
+            fleet.replace_evidence(asset)
+            with self.subTest(key=key), self.assertRaisesRegex(MODULE.Refusal, "CLI archive inventory"): fleet.acquire()
         for value in (None, [], {}, "invalid"):
-            fleet = ObsSyncFleet("1.2.0"); asset = fleet.release_manifest()
-            asset["artifacts"]["cli_bundle"] = value; fleet.replace_evidence(asset)
-            with self.subTest(value=value), self.assertRaisesRegex(MODULE.Refusal, "CLI bundle metadata"):
+            fleet = ObsSyncFleet("1.1.6"); asset = fleet.release_manifest()
+            asset["artifacts"]["cli_archives"] = value; fleet.replace_evidence(asset)
+            with self.assertRaisesRegex(MODULE.Refusal, "CLI archive inventory"): fleet.acquire()
+
+    def test_cli_archive_metadata_is_closed_and_bounded(self):
+        for value in (None, [], {}, "invalid"):
+            fleet = ObsSyncFleet("1.1.6"); asset = fleet.release_manifest()
+            asset["artifacts"]["cli_archives"]["linux-amd64"] = value; fleet.replace_evidence(asset)
+            with self.subTest(value=value), self.assertRaisesRegex(MODULE.Refusal, "CLI archive metadata"):
                 fleet.acquire()
-        valid = ObsSyncFleet("1.2.0").release_manifest()["artifacts"]["cli_bundle"]
+        valid = ObsSyncFleet("1.1.6").release_manifest()["artifacts"]["cli_archives"]["linux-amd64"]
         for field in valid:
-            fleet = ObsSyncFleet("1.2.0"); asset = fleet.release_manifest()
-            del asset["artifacts"]["cli_bundle"][field]; fleet.replace_evidence(asset)
-            with self.subTest(missing=field), self.assertRaisesRegex(MODULE.Refusal, "CLI bundle metadata"):
+            fleet = ObsSyncFleet("1.1.6"); asset = fleet.release_manifest()
+            del asset["artifacts"]["cli_archives"]["linux-amd64"][field]; fleet.replace_evidence(asset)
+            with self.subTest(missing=field), self.assertRaisesRegex(MODULE.Refusal, "CLI archive metadata"):
                 fleet.acquire()
         for field, values in {
-            "name": (None, "obsync-cli-v1.2.0.zip", "obsync-cli-1.2.1.zip"),
-            "size": (True, 1.0, 0, -1, 4 * 1024 * 1024 + 1),
+            "name": (None, "obsync-cli-v1.1.6-linux-amd64.zip", "obsync-cli-1.1.7-linux-amd64.zip"),
+            "size": (True, 1.0, 0, -1, 8 * 1024 * 1024 + 1),
             "content_type": (None, "application/gzip"), "extra": (True,),
             "runtime": (None, [], {}, {**valid["runtime"], "version": "26.9.0"},
                         {**valid["runtime"], "name": "bun"}, {**valid["runtime"], "delivery": "bundled"},
@@ -577,37 +589,37 @@ class ObsSyncReleaseTests(unittest.TestCase):
             "digest": (None, "wrong", "sha256:" + "0" * 64, "sha256:" + "A" * 64),
         }.items():
             for value in values:
-                fleet = ObsSyncFleet("1.2.0"); asset = fleet.release_manifest()
-                asset["artifacts"]["cli_bundle"][field] = value
+                fleet = ObsSyncFleet("1.1.6"); asset = fleet.release_manifest()
+                asset["artifacts"]["cli_archives"]["linux-amd64"][field] = value
                 # Matching uploaded metadata must not make an invalid declaration valid.
-                uploaded = next(record for record in fleet.release["assets"] if record["name"] == "obsync-cli-1.2.0.zip")
+                uploaded = next(record for record in fleet.release["assets"] if record["name"] == "obsync-cli-1.1.6-linux-amd64.zip")
                 if field in ("digest", "size", "content_type"):
                     uploaded[field] = int(value) if field == "size" and isinstance(value, (bool, float)) else value
                 elif field == "name" and isinstance(value, str):
                     uploaded["name"] = value
-                    uploaded["browser_download_url"] = f"https://github.com/snaraj/obsync/releases/download/1.2.0/{value}"
+                    uploaded["browser_download_url"] = f"https://github.com/snaraj/obsync/releases/download/1.1.6/{value}"
                 fleet.replace_evidence(asset)
-                with self.subTest(field=field, value=value), self.assertRaisesRegex(MODULE.Refusal, "CLI bundle metadata|asset digest"):
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(MODULE.Refusal, "CLI archive metadata|asset digest"):
                     fleet.acquire()
-        for size in (1, 4 * 1024 * 1024):
-            fleet = ObsSyncFleet("1.2.0"); asset = fleet.release_manifest()
-            asset["artifacts"]["cli_bundle"]["size"] = size; fleet.replace_evidence(asset, mirror=True)
+        for size in (1, 8 * 1024 * 1024):
+            fleet = ObsSyncFleet("1.1.6"); asset = fleet.release_manifest()
+            asset["artifacts"]["cli_archives"]["linux-amd64"]["size"] = size; fleet.replace_evidence(asset, mirror=True)
             with self.subTest(size=size): self.assertEqual(fleet.acquire()[0], fleet.expected_record())
 
     def test_cli_release_asset_matches_the_exact_declaration(self):
         for field, value in (
-            ("name", "obsync-cli-v1.2.0.zip"), ("digest", "sha256:" + "f" * 64),
-            ("size", 41), ("size", 4 * 1024 * 1024 + 1), ("size", True),
+            ("name", "obsync-cli-v1.1.6-linux-amd64.zip"), ("digest", "sha256:" + "f" * 64),
+            ("size", 41), ("size", 8 * 1024 * 1024 + 1), ("size", True),
             ("content_type", "application/gzip"), ("state", "new"),
-            ("browser_download_url", "https://example.invalid/obsync-cli-1.2.0.zip"),
+            ("browser_download_url", "https://example.invalid/obsync-cli-1.1.6-linux-amd64.zip"),
         ):
-            fleet = ObsSyncFleet("1.2.0")
-            cli = next(record for record in fleet.release["assets"] if record["name"] == "obsync-cli-1.2.0.zip")
+            fleet = ObsSyncFleet("1.1.6")
+            cli = next(record for record in fleet.release["assets"] if record["name"] == "obsync-cli-1.1.6-linux-amd64.zip")
             cli[field] = value
             with self.subTest(field=field, value=value), self.assertRaises(MODULE.Refusal): fleet.acquire()
         for change in ("absent", "duplicate", "foreign"):
-            fleet = ObsSyncFleet("1.2.0")
-            cli = next(record for record in fleet.release["assets"] if record["name"] == "obsync-cli-1.2.0.zip")
+            fleet = ObsSyncFleet("1.1.6")
+            cli = next(record for record in fleet.release["assets"] if record["name"] == "obsync-cli-1.1.6-linux-amd64.zip")
             if change == "absent": fleet.release["assets"].remove(cli)
             elif change == "duplicate": fleet.release["assets"][-2] = dict(cli)
             else: fleet.release["assets"].append({**cli, "name": "unexpected.zip"})
