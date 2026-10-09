@@ -53,7 +53,7 @@ apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   annotations:
-    platform.snaraj.dev/chart-release: "1.1.6"
+    platform.snaraj.dev/chart-release: "1.1.7"
   name: obsync-chart
   namespace: obsidian
 spec:
@@ -62,7 +62,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    digest: sha256:3be1d6e3f8ecfd0d6159f8e687eab36ffc2582fd2366efd48eb02f1f1c26a7ed
+    digest: sha256:b1f4216d5780f8448953bffe4aed60af05a85348dbc93f642858c33428cba08d
   timeout: 60s
   url: oci://ghcr.io/snaraj/charts/obsync
   verify:
