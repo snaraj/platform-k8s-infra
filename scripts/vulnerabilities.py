@@ -13,7 +13,7 @@ import validate
 
 VERSION = "0.76.1"
 MAX_AGE = dt.timedelta(hours=24)
-GO_APPLICATIONS = {"naranjo-online", "lidersea-com"}
+GO_APPLICATIONS = {"naranjo-online", "lidersea-com", "hospedajedonlolo-com"}
 RUST_APPLICATIONS = {"obsync"}
 
 

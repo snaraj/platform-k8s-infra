@@ -1,37 +1,18 @@
-# hospedajedonlolo.com's Helm chart is published as a signed OCI artifact by
-# that site's own release publisher. The immutable manifest digest below is the
-# only selector source-controller consumes; once active, the release
-# annotation is the reviewed human label whose tag-to-digest mapping was
-# independently resolved.
-#
-# PENDING SELECTION — THIS OBJECT CANNOT DEPLOY ANYTHING.
-# `ref.digest` is the all-zero fail-closed sentinel: a syntactically valid
-# digest no registry resolves. snaraj/hospedajedonlolo.com has not published a
-# release, so no real digest exists to select, and inventing one would be
-# worse than stating none. source-controller refuses to produce an artifact
-# for it, so the HelmRelease beside this file installs nothing while the
-# sentinel stands. The annotation names the first release the publisher is
-# expected to cut; it is a label, not a resolved mapping, until activation
-# resolves it.
-#
-# The sentinel is not a relaxation: `scripts/validate.py` lists this slug in
-# PENDING_APPLICATIONS and requires EXACTLY this digest for a pending
-# application, so committing a REAL digest here is a gate failure. The active
-# applications carry the opposite rule — the sentinel is refused for them. A
-# real digest can therefore appear only in the reviewed change that moves this
-# slug to APPLICATIONS and adds its acquisition receipt record.
+# hospedajedonlolo.com's Helm chart is published as a signed OCI artifact by that
+# site's own release publisher. The immutable manifest digest below is the
+# only selector source-controller consumes; the release annotation is the
+# reviewed human label whose tag-to-digest mapping was independently resolved.
 #
 # The chart VERSION and the SIGNING REF are two different things. The version
 # is audit metadata; the signature is minted by a
 # workflow_dispatch run of the publisher selected from that repository's
 # protected `main` branch, which its own reviewed release contract enforces, so
 # the certificate identity ends in @refs/heads/main. That ref is the stronger
-# anchor: a run at a ref executes the workflow definition AT that ref. Tag
-# creation is not a protected operation, so a tag-ref identity would be
-# mintable by any holder of `contents: write` (ADR 0016 amendment 2026-08-22).
-# That `refs/heads/main` is gated by a ruleset with no bypass actors in the
-# source repository is a precondition of activation, verified then; it is not
-# asserted here for a repository that has published nothing.
+# anchor: a run at a ref executes the workflow definition AT that ref, and
+# `refs/heads/main` is the only ref in that repository whose creation and
+# update are gated by a ruleset with no bypass actors. Tag creation is not
+# restricted there, so a tag-ref identity would be mintable by any holder of
+# `contents: write` (ADR 0016 amendment 2026-08-22).
 #
 # Fail-closed properties this object carries, none of which may be relaxed
 # without a reviewed decision:
@@ -40,14 +21,14 @@
 #     artifact for a chart that carries no cosign signature, or one signed by
 #     any identity other than THIS site's release-publisher workflow running on
 #     protected `main`. The subject pattern is anchored end to end so the
-#     sibling sites' publishers, another workflow in the same repository, a run
+#     sibling site's publisher, another workflow in the same repository, a run
 #     at any other ref — a tag ref included — and any look-alike host are all
-#     rejected: the site identity tuples must never couple (AGENTS.md safety
-#     invariant 14).
-#   * spec.ref contains exactly one sha256 digest and no tag or semver range.
-#     Moving, deleting, or replacing a registry tag cannot change the bytes
-#     Flux selects. A site release reaches the cluster only through a reviewed
-#     change that resolves the human tag and verifies the digest and signer.
+#     rejected: the two site identity tuples must never couple (AGENTS.md
+#     safety invariant 14).
+#   * spec.ref contains exactly one nonzero sha256 digest. Moving, deleting,
+#     or replacing a registry tag cannot change the bytes Flux selects. A new
+#     site release reaches the cluster only through a reviewed platform change
+#     that re-resolves the human tag and verifies the new digest and signer.
 #   * No secretRef, serviceAccountName, certSecretRef, or proxySecretRef: the
 #     registry is read anonymously and the cluster holds no registry
 #     credential, exactly as it holds no Git credential (ADR 0003, safety
@@ -76,7 +57,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:2cd06606dbd39bab83ce86ab3f0c432afe8380e1367a92de51131d3ee7280a61
   timeout: 60s
   url: oci://ghcr.io/snaraj/charts/hospedajedonlolo-com
   verify:

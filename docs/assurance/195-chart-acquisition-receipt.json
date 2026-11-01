@@ -2,6 +2,19 @@
   "chartLayerMediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
   "capturedDate": "2026-11-01",
   "records": {
+    "hospedajedonlolo-com": {
+      "arm64Digest": "sha256:6e984bb7e74750dcc15e2a872e47b56bca4bccf670751704585151f7807804ba",
+      "chart": {"appVersion": "0.1.1", "name": "hospedajedonlolo-com", "version": "0.1.1"},
+      "chartConfigDigest": "sha256:5e12612abc96684cb72d93709e2edaffb151d48374f643606d539c9ac1c94d8f",
+      "chartLayerDigest": "sha256:f1e9e73736eae6cd208bad13b9b591a5371d761a876eea60a717eb0559971d6f",
+      "chartRepository": "ghcr.io/snaraj/charts/hospedajedonlolo-com",
+      "chartTag": "0.1.1",
+      "manifestDigest": "sha256:2cd06606dbd39bab83ce86ab3f0c432afe8380e1367a92de51131d3ee7280a61",
+      "matchingChartLayerCount": 1,
+      "release": {"assetDigest": "sha256:62b61082d6be6c6302ac78496203ff13184dc6a2bb4b970a83b9a74e003c9f4c", "sourceSha": "0cfed46cce53aa72a57c349de9ace14d9cb3837a"},
+      "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/hospedajedonlolo.com/.github/workflows/release-publisher.yml@refs/heads/main"},
+      "workloadImage": "ghcr.io/snaraj/hospedajedonlolo-com:v0.1.1@sha256:0f945357b61044aec9a52c9eedaa6b1d6f894f0d24b76aa867c7494d0731d42d"
+    },
     "lidersea-com": {
       "arm64Digest": "sha256:c88b8b8e86e2dc4da10f397ac642264f3f41b6b905d2c10197a3010cc20f9f72",
       "chart": {"appVersion": "0.1.49", "name": "lidersea-com", "version": "0.1.49"},

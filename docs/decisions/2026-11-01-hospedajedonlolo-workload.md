@@ -156,13 +156,26 @@ asserted for a repository that has published nothing.
 
 - Plain HTTP between the connector and the site inside the namespace's
   default-deny boundary, as for every site (§3).
-- The video is delivered through the edge, as naranjo.online's films are.
-  Whether deliberate large-media delivery fits the edge provider's terms is the
-  owner's question; it is recorded here, not resolved.
+- The video is not delivered. The platform keeps public video delivery a
+  `NO-GO` (its ADR 0006 and safety invariant 13), so the site verifies the
+  film on its volume but answers 404 for it until the owner lifts that
+  boundary.
 - HSTS does not protect a visitor's very first request, and preload is a
   one-way decision left to the owner.
 - `PENDING_APPLICATIONS` gains its second-ever entry. The state itself is not
   new — it was reviewed with obsync — and none of its rules change; its tests
   now run against this declared entry as well as a synthetic fixture.
+
+## 7. Activation record
+
+Step 4 landed with issue #86 at the first release, v0.1.1. The chart is
+`ghcr.io/snaraj/charts/hospedajedonlolo-com:0.1.1` at
+`sha256:2cd06606dbd39bab83ce86ab3f0c432afe8380e1367a92de51131d3ee7280a61`, and
+the image is `ghcr.io/snaraj/hospedajedonlolo-com:v0.1.1` at
+`sha256:0f945357b61044aec9a52c9eedaa6b1d6f894f0d24b76aa867c7494d0731d42d`. The
+chart signature, the image provenance, the immutable Release and its
+manifest, and the annotated tag's protected-source ancestry were all
+verified with the pinned cosign. The release is unsuspended and still
+`deploymentReady: false`; step 5 is next.
 
 - Opus5.5

@@ -151,7 +151,7 @@ class VulnerabilityTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, "")
             with patch.object(scan.validate, "verify"), \
                     patch.object(scan.validate, "check", return_value=({}, {"records":
-                        {slug: record for slug in ("naranjo-online", "lidersea-com", "obsync")}})), \
+                        {slug: record for slug in ("naranjo-online", "lidersea-com", "obsync", "hospedajedonlolo-com")}})), \
                     patch.dict(scan.os.environ, {"TRIVY_IGNORE_UNFIXED": "true"}), \
                     patch.object(scan.subprocess, "run", side_effect=command):
                 if expected is None:
@@ -159,7 +159,7 @@ class VulnerabilityTests(unittest.TestCase):
                         scan.run()
                 else:
                     self.assertEqual(scan.run(), expected)
-            self.assertEqual(len(observed), 2 if mode == "stale" else (5 if expected is not None else 3))
+            self.assertEqual(len(observed), 2 if mode == "stale" else (6 if expected is not None else 3))
 
 
 if __name__ == "__main__":
