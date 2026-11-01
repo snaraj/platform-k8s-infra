@@ -64,13 +64,24 @@ every outgoing commit, including material removed before the final tree.
 Use `git -c core.hooksPath=.githooks push origin <task-branch>` after local checks.
 
 Between changes, **Selected artifact verification** runs daily at 07:19 UTC.
-Its manual workflow dispatch accepts `main` only. It repeats `make verify`
+Its manual workflow dispatch accepts `main` only. It repeats acquisition verification
 against the manifests and acquisition receipts at the triggering main commit,
 including older releases still selected for deployment. Failures remain failed
-workflow runs. A second read-only check compares both selections with their
+workflow runs. A second read-only check compares all active selections with their
 latest immutable final releases; missing inventory, malformed releases,
 regressions and newer versions fail the run. The job never publishes or deploys.
-This identity check does not rescan images for newly disclosed vulnerabilities.
+The same job runs `python3 -I -B scripts/vulnerabilities.py`: after reproducing
+the signed acquisition receipts, checksum-pinned Trivy scans each selected
+arm64 manifest. A fresh database (at most 24 hours old), Debian package
+inventory, Go standard-library analysis for the two Go applications, and the
+exact image/platform are required. The dependency-free Rust application has
+OS-package coverage here; Rust source/SBOM advisory review remains separate.
+Every reported severity,
+including unknown and unfixed findings, fails the job. Scanner or acquisition
+errors remain UNKNOWN failures; no ignore list or environment override hides
+findings. The log records database metadata, image digests and findings for
+triage. This database scan detects known package matches; it does not establish
+exploit reachability or replace advisory review.
 
 Dependabot checks GitHub Actions updates every day at 07:31 UTC, including
 weekends. CodeQL's paired actions are grouped for both version and security
