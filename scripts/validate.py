@@ -44,18 +44,18 @@ APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.onlin
 # APPLICATIONS and adds its acquisition receipt record. The two rules above are
 # opposites, so that change cannot half-land: leaving the sentinel while active
 # fails, and committing a real digest while pending fails.
-# Empty because obsync was promoted, NOT because the state was retired. The
-# rules below are still enforced and their tests still stand; the next
-# application whose publisher has not cut a release enters here.
-PENDING_APPLICATIONS = {}
+# obsync entered here first and was promoted. hospedajedonlolo.com is admitted
+# pending by docs/decisions/2026-11-01-hospedajedonlolo-workload.md: its
+# publisher has cut no release, so it is composed and inert until that change.
+PENDING_APPLICATIONS = {"hospedajedonlolo-com": "hospedajedonlolo.com"}
 
 FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml")
 # The namespace each application composes into. `obsync` is the one slug whose
 # namespace is not its own name: the owner's `obsidian` namespace may later hold
 # other Obsidian-related workloads, and nothing about this application is
 # derived from it. Envelope closure below reads this map, so it cannot rot.
-NAMESPACES = {"lidersea-com": "lidersea-com", "naranjo-online": "naranjo-online",
-              "obsync": "obsidian"}
+NAMESPACES = {"hospedajedonlolo-com": "hospedajedonlolo-com", "lidersea-com": "lidersea-com",
+              "naranjo-online": "naranjo-online", "obsync": "obsidian"}
 HELM_CHART_MEDIA_TYPE = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 REVIEWED_ISSUER = r"^https://token\.actions\.githubusercontent\.com$"
 # The exact object each file must name: API version, kind, `metadata.name`
