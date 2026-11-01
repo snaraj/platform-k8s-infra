@@ -779,17 +779,50 @@ spec:
             del composition.APPLICATIONS[slug]
         composition.check(self.root)
 
+    def pending_subjects(self):
+        """Every pending application: the declared ones and the fixture.
+
+        The fixture keeps these rules from passing vacuously once the declared
+        map empties again; the declared entries keep them bound to the real
+        manifests rather than to a copy.
+        """
+
+        fixture = self.pending_application()
+        subjects = sorted(composition.PENDING_APPLICATIONS)
+        self.assertIn(fixture, subjects)
+        return subjects
+
+    def write_repinned(self, slug, name, text, pending):
+        """Write a mutation together with a regenerated shape pin for it."""
+
+        relative = f"kubernetes/websites/{slug}/{name}"
+        (self.root / relative).write_text(text)
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        shapes = json.loads(shapes_path.read_text())
+        normalized, _, _ = composition.normalized_manifest(text.encode(), name == "source.yaml", pending)
+        shapes[relative] = hashlib.sha256(normalized).hexdigest()
+        shapes_path.write_text(json.dumps(shapes, indent=2) + "\n")
+
     def test_a_pending_selection_may_be_the_sentinel_and_nothing_else(self):
-        slug = self.pending_application()
-        path = self.root / "kubernetes/websites" / slug / "source.yaml"
-        original = path.read_text()
-        self.assertIn(composition.SENTINEL_DIGEST, original)
-        for replacement in ("sha256:" + "1" * 64, "sha256:" + "a" * 64):
-            with self.subTest(digest=replacement):
-                path.write_text(original.replace(composition.SENTINEL_DIGEST, replacement))
-                with self.assertRaisesRegex(ValueError, "must select the sentinel digest"):
-                    composition.check(self.root)
-        path.write_text(original)
+        """Refused alone AND with a pin regenerated as if the slug were active."""
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        for slug in self.pending_subjects():
+            path = self.root / "kubernetes/websites" / slug / "source.yaml"
+            original, shapes_source = path.read_text(), shapes_path.read_text()
+            self.assertIn(composition.SENTINEL_DIGEST, original)
+            for replacement in ("sha256:" + "1" * 64, "sha256:" + "a" * 64):
+                mutated = original.replace(composition.SENTINEL_DIGEST, replacement)
+                for repinned in (False, True):
+                    with self.subTest(slug=slug, digest=replacement, repinned=repinned):
+                        if repinned:
+                            self.write_repinned(slug, "source.yaml", mutated, False)
+                        else:
+                            path.write_text(mutated)
+                        with self.assertRaisesRegex(ValueError, "must select the sentinel digest"):
+                            composition.check(self.root)
+                    path.write_text(original)
+                    shapes_path.write_text(shapes_source)
         composition.check(self.root)
 
     def test_an_active_selection_may_be_anything_but_the_sentinel(self):
@@ -807,19 +840,97 @@ spec:
         composition.check(self.root)
 
     def test_a_pending_release_must_stay_suspended_and_not_ready(self):
-        slug = self.pending_application()
-        path = self.root / "kubernetes/websites" / slug / "release.yaml"
-        original = path.read_text()
-        for before, after in (
-            ("  suspend: true", "  suspend: false"),
-            ("    deploymentReady: false", "    deploymentReady: true"),
-        ):
-            with self.subTest(mutation=after):
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        for slug in self.pending_subjects():
+            path = self.root / "kubernetes/websites" / slug / "release.yaml"
+            original, shapes_source = path.read_text(), shapes_path.read_text()
+            for before, after in (
+                ("  suspend: true", "  suspend: false"),
+                ("    deploymentReady: false", "    deploymentReady: true"),
+            ):
                 self.assertEqual(original.count(before), 1)
-                path.write_text(original.replace(before, after))
-                with self.assertRaisesRegex(ValueError, "suspended and not ready"):
-                    composition.check(self.root)
-            path.write_text(original)
+                for repinned in (False, True):
+                    with self.subTest(slug=slug, mutation=after, repinned=repinned):
+                        mutated = original.replace(before, after)
+                        if repinned:
+                            self.write_repinned(slug, "release.yaml", mutated, True)
+                        else:
+                            path.write_text(mutated)
+                        with self.assertRaisesRegex(ValueError, "suspended and not ready"):
+                            composition.check(self.root)
+                    path.write_text(original)
+                    shapes_path.write_text(shapes_source)
+        composition.check(self.root)
+
+    def test_hospedajedonlolo_is_pending_inert_and_bound_to_its_own_publisher(self):
+        """The 2026-11-01 decision, read back from the manifests as literals.
+
+        Nothing below is derived from the validator, so a derivation that moved
+        together with a regenerated pin still disagrees with this test. The
+        default-deny policy is asserted here because its contents are otherwise
+        held only by the byte pin. Activation moves this slug to APPLICATIONS in
+        one reviewed change, and that change rewrites this test with it.
+        """
+
+        slug, repository = "hospedajedonlolo-com", "hospedajedonlolo.com"
+        self.assertEqual(composition.PENDING_APPLICATIONS.get(slug), repository)
+        self.assertNotIn(slug, composition.APPLICATIONS)
+        self.assertEqual(composition.NAMESPACES.get(slug), slug)
+        directory = self.root / "kubernetes/websites" / slug
+        source = (directory / "source.yaml").read_text()
+        self.assertEqual(composition.DIGEST_LINE.findall(source), ["sha256:" + "0" * 64])
+        self.assertEqual(composition.URL_LINE.findall(source),
+                         ["oci://ghcr.io/snaraj/charts/hospedajedonlolo-com"])
+        self.assertEqual(composition.SUBJECT_LINE.findall(source), [
+            r"^https://github\.com/snaraj/hospedajedonlolo\.com"
+            r"/\.github/workflows/release-publisher\.yml@refs/heads/main$"])
+        release = (directory / "release.yaml").read_text()
+        self.assertEqual(composition.SUSPEND_LINE.findall(release), ["true"])
+        self.assertEqual(composition.READY_LINE.findall(release), ["false"])
+        self.assertIn("\n  serviceAccountName: helm-reconciler\n", release)
+        spec_lines = composition.manifest_envelope(release.encode(), "release.yaml", slug, repository)
+        self.assertEqual(composition.parse_values_block(composition.values_body(spec_lines)),
+                         {"deploymentReady"})
+        self.assertIn("\n  podSelector: {}\n  policyTypes:\n    - Ingress\n    - Egress\n",
+                      (directory / "default-deny.yaml").read_text())
+        selections, receipt = composition.check(self.root)
+        self.assertNotIn(slug, selections)
+        self.assertNotIn(slug, receipt["records"])
+
+    def test_a_pending_source_cannot_carry_another_applications_identity(self):
+        """The identity tuples never couple, even with a regenerated pin.
+
+        Every other declared application's publisher subject and chart
+        repository, read from its own manifest, is substituted into each
+        pending source and RE-PINNED, so the byte pin passes and only the
+        matcher closure and the identity binding stand.
+        """
+
+        shapes_path = self.root / "policies/manifest-shapes.json"
+        subjects = self.pending_subjects()
+        declared = sorted({**composition.APPLICATIONS, **composition.PENDING_APPLICATIONS})
+        refused = 0
+        for slug in subjects:
+            path = self.root / "kubernetes/websites" / slug / "source.yaml"
+            original, shapes_source = path.read_text(), shapes_path.read_text()
+            for other in sorted(set(declared) - {slug}):
+                foreign = (self.root / "kubernetes/websites" / other / "source.yaml").read_text()
+                for field, line, expected in (
+                    ("publisher", composition.SUBJECT_LINE,
+                     "is not the reviewed matcher|publisher identity is not the declared"),
+                    ("chart", composition.URL_LINE, "chart repository is not the declared"),
+                ):
+                    before, after = line.findall(original)[0], line.findall(foreign)[0]
+                    self.assertNotEqual(before, after)
+                    self.assertEqual(original.count(before), 1)
+                    with self.subTest(slug=slug, other=other, field=field):
+                        self.write_repinned(slug, "source.yaml", original.replace(before, after), True)
+                        with self.assertRaisesRegex(ValueError, expected):
+                            composition.check(self.root)
+                        refused += 1
+                    path.write_text(original)
+                    shapes_path.write_text(shapes_source)
+        self.assertEqual(refused, 2 * len(subjects) * (len(declared) - 1))
         composition.check(self.root)
 
     def test_a_third_undeclared_directory_is_refused(self):

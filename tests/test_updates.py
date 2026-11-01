@@ -421,10 +421,13 @@ class UpdatesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unexpected paths"):
                 updates.verify_delta(self.root, base, files)
             path.write_bytes(original)
-        self.assertEqual(denied, [pending], "the denial ran against the declared pending subject")
+        # Every declared pending application is a subject, the fixture among
+        # them, so neither a real pending site nor the fixture can be skipped.
+        self.assertIn(pending, denied, "the denial ran against the declared pending subject")
+        self.assertEqual(denied, sorted(updates.validate.PENDING_APPLICATIONS))
 
     def test_the_publication_surface_admits_no_undeclared_application(self):
-        """A fourth directory is refused by the publication gate as well.
+        """An undeclared directory is refused by the publication gate as well.
 
         The composition inventory refuses it too, so neither gate is alone
         load-bearing — which is the point: the publication allowlist is an
@@ -435,7 +438,11 @@ class UpdatesTests(unittest.TestCase):
         for slug in sorted(updates.validate.APPLICATIONS) + sorted(updates.validate.PENDING_APPLICATIONS):
             updates.publication.path_allowed(
                 f"kubernetes/websites/{slug}/source.yaml")
-        for undeclared in ("undeclared", "obsync-staging", "naranjo-online-copy"):
+        # The pending site is admitted by its slug alone: its repository name,
+        # a stem and a suffixed copy are each a different directory.
+        updates.publication.path_allowed("kubernetes/websites/hospedajedonlolo-com/release.yaml")
+        for undeclared in ("undeclared", "obsync-staging", "naranjo-online-copy",
+                           "hospedajedonlolo.com", "hospedajedonlolo", "hospedajedonlolo-com-copy"):
             with self.subTest(directory=undeclared):
                 with self.assertRaisesRegex(ValueError, "unexpected publication file"):
                     updates.publication.path_allowed(
