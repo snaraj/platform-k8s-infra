@@ -37,14 +37,14 @@
         },
         {
           "name": "Install checksum-verified tools",
-          "run": "bash scripts/ci/install-tools.sh verify"
+          "run": "bash scripts/ci/install-tools.sh verify\nbash scripts/ci/install-tools.sh vulnerabilities"
         },
         {
-          "name": "Reproduce the currently selected acquisition receipts",
+          "name": "Verify acquisition and scan selected arm64 images",
           "env": {
             "GH_TOKEN": "${{ github.token }}"
           },
-          "run": "make verify"
+          "run": "python3 -I -B scripts/vulnerabilities.py"
         },
         {
           "name": "Detect newer immutable application releases",

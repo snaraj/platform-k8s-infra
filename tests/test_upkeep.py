@@ -121,10 +121,10 @@ class UpkeepTests(unittest.TestCase):
         self.assertEqual(checkout["uses"], existing_pin)
         self.assertEqual(checkout["with"], {"ref": "${{ github.sha }}", "persist-credentials": False})
         self.assertEqual(set(tools), {"name", "run"})
-        self.assertEqual(tools["run"], "bash scripts/ci/install-tools.sh verify")
+        self.assertEqual(tools["run"], "bash scripts/ci/install-tools.sh verify\nbash scripts/ci/install-tools.sh vulnerabilities")
         self.assertEqual(set(verify), {"name", "env", "run"})
         self.assertEqual(verify["env"], {"GH_TOKEN": "${{ github.token }}"})
-        self.assertEqual(verify["run"], "make verify")
+        self.assertEqual(verify["run"], "python3 -I -B scripts/vulnerabilities.py")
         self.assertEqual(latest, {"name": "Detect newer immutable application releases",
                                   "env": {"GH_TOKEN": "${{ github.token }}"},
                                   "run": "python3 -I -B scripts/updates.py check-latest"})
