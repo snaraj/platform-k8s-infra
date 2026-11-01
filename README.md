@@ -34,10 +34,14 @@ PersistentVolumes and Secret, together with the move from the undeliverable
 class at 100Gi/4Gi. `scripts/validate.py` pins that profile and the activated
 value by name, so a silent regression fails as a named refusal rather than only
 as a changed byte pin.
-`PENDING_APPLICATIONS` is now empty — the state is unused, not retired, and the
-next application whose publisher has not cut a release enters it. The decision
-admitting obsync is
+The decision admitting obsync is
 [docs/decisions/2026-09-07-obsync-workload.md](docs/decisions/2026-09-07-obsync-workload.md).
+
+hospedajedonlolo.com is composed the same way obsync began: pending and inert.
+Its publisher has cut no release, so it is in `PENDING_APPLICATIONS` with the
+sentinel selection, a suspended and not-ready release and no receipt record,
+until one reviewed change activates it. The decision admitting it is
+[docs/decisions/2026-11-01-hospedajedonlolo-workload.md](docs/decisions/2026-11-01-hospedajedonlolo-workload.md).
 
 The verifier checks the allowed manifest boundary and independently reproduces
 the acquisition receipt from public artifacts. Verification covers chart and
