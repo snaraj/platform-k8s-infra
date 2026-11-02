@@ -179,7 +179,7 @@ class FakeFleet:
                 raise answer
             return json.dumps(answer)
         if argv[:3] == ["cosign", "version", "--json"]:
-            return json.dumps({"gitVersion": "v3.1.3"})
+            return json.dumps({"gitVersion": "v3.1.4"})
         if argv[:2] == ["cosign", "verify"]:
             digest = argv[-1].split("@", 1)[1]
             return json.dumps([{"critical": {"image": {"docker-manifest-digest": digest}, "identity": {"docker-reference": argv[-1]}}, "optional": {}}])
@@ -197,7 +197,7 @@ class FakeFleet:
         return MODULE.GitHub(run=self.run, fetch=self.fetch)
 
     def cosign(self):
-        return MODULE.Cosign(run=self.run, pinned_version="v3.1.3")
+        return MODULE.Cosign(run=self.run, pinned_version="v3.1.4")
 
     def selection(self, committed="0.1.69"):
         return MODULE.Selection(self.slug, f"kubernetes/websites/{self.slug}/source.yaml", committed, "sha256:" + "0" * 64, self.chart_repo, self.site, self.subject)

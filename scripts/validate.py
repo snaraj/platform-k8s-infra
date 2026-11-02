@@ -663,7 +663,7 @@ def verify(root: Path = ROOT, registry=None, github=None, cosign=None) -> None:
     selections, receipt = check(root)
     registry = registry or artifacts.Registry()
     github = github or artifacts.GitHub()
-    cosign = cosign or artifacts.Cosign(pinned_version="v3.1.3")
+    cosign = cosign or artifacts.Cosign(pinned_version="v3.1.4")
     for slug, selection in selections.items():
         record, _inspection = artifacts.acquire(selection, selection.version, registry, github, cosign)
         if record != receipt["records"][slug]:
