@@ -147,8 +147,9 @@ asserted for a repository that has published nothing.
    updates the tests that name this slug. The two rule sets are opposites, so it
    cannot half-land: the sentinel while active fails, and a real digest while
    pending fails.
-5. **`deploymentReady: true`** is its own reviewed decision against proven
-   prerequisites, never a side effect of selecting a chart.
+5. **`deploymentReady: true`** is a reviewed decision against proven
+   prerequisites, never a side effect of selecting a chart. Amended
+   2026-11-02: it lands in step 4's change (see §7).
 6. **The operator lifts the reconciler's suspension**, and the public route is
    enabled last, under its own authorization.
 
@@ -175,7 +176,20 @@ the image is `ghcr.io/snaraj/hospedajedonlolo-com:v0.1.1` at
 `sha256:0f945357b61044aec9a52c9eedaa6b1d6f894f0d24b76aa867c7494d0731d42d`. The
 chart signature, the image provenance, the immutable Release and its
 manifest, and the annotated tag's protected-source ancestry were all
-verified with the pinned cosign. The release is unsuspended and still
-`deploymentReady: false`; step 5 is next.
+verified with the pinned cosign.
+
+Steps 4 and 5 landed together. The platform's reviewed onboarding runbook
+(snaraj/platform `docs/design/hospedajedonlolo-onboarding.md`, step 9) pairs
+the real selection, the unsuspended release and `deploymentReady: true` with
+the platform change that removes the namespace from its pending policy set
+(snaraj/platform issue #429), and its policy refuses an unsuspended release or
+a real digest while the namespace is pending. A selected but not-ready state
+would therefore have been an intermediate that neither repository's policy
+describes. The prerequisites readiness describes were proven live first by
+the operator under the owner's authorization: the namespace and its budgets,
+the tenant accounts, the bound read-only media claim and the ready connector.
+Nothing reconciles from this directory until the platform's reconciler,
+created suspended, is lifted after both changes merge, so the merge itself
+changes nothing live.
 
 - Opus5.5

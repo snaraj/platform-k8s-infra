@@ -1,7 +1,7 @@
 {
   "kubernetes/websites/hospedajedonlolo-com/default-deny.yaml": "aa765c088076373ac2a181adb0d54a1e5976f57104f2f8f455bc814690af2f22",
   "kubernetes/websites/hospedajedonlolo-com/kustomization.yaml": "0842bdd52c4b1c760c80fa8e274fec277bfecb7e2e2e4d410b01b158575f7d54",
-  "kubernetes/websites/hospedajedonlolo-com/release.yaml": "ec1af753df8cf0dcf3a3b1ef70d61bd480d76ac816359c377e19fd9f8ac48848",
+  "kubernetes/websites/hospedajedonlolo-com/release.yaml": "b044df0d42b09d1a1b9dc42ab5950ef2e1a1e86cbc26c8454acfdef3f93119ce",
   "kubernetes/websites/hospedajedonlolo-com/source.yaml": "52130a4888d632e49ae3b519e19c9baf5d720baca10f3e1f15e444f6f566cdf4",
   "kubernetes/websites/lidersea-com/default-deny.yaml": "1de865e81ef625ee49103a12034bbb2c2b44626d0e9d112656a8cf11b1f04652",
   "kubernetes/websites/lidersea-com/kustomization.yaml": "0842bdd52c4b1c760c80fa8e274fec277bfecb7e2e2e4d410b01b158575f7d54",

@@ -49,9 +49,6 @@ spec:
   # The exact-site Cosign-verified chart is the sole carrier of image
   # repository, tag, and digest. A platform image override would decouple the
   # selected chart release from the workload it deploys. This one explicit
-  # value remains the chart's reviewed activation gate. It stays false until the
-  # platform and operator prerequisites are proven live; setting it true is
-  # its own reviewed change (docs/decisions/2026-11-01-hospedajedonlolo-workload.md
-  # section 5, step 5), never a side effect of selecting this chart.
+  # value remains the chart's reviewed activation gate.
   values:
-    deploymentReady: false
+    deploymentReady: true

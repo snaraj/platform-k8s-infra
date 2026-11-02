@@ -13,7 +13,13 @@ import validate
 
 VERSION = "0.76.1"
 MAX_AGE = dt.timedelta(hours=24)
-GO_APPLICATIONS = {"naranjo-online", "lidersea-com", "hospedajedonlolo-com"}
+# Each Go application with its own main module. Go embeds that module without
+# a semantic version, so it is admitted unversioned in its own report only.
+GO_APPLICATIONS = {
+    "naranjo-online": "github.com/snaraj/naranjo.online",
+    "lidersea-com": "github.com/snaraj/lidersea.com",
+    "hospedajedonlolo-com": "github.com/snaraj/hospedajedonlolo.com",
+}
 RUST_APPLICATIONS = {"obsync"}
 
 
@@ -25,7 +31,7 @@ def fresh_database(metadata, now):
         raise ValueError("vulnerability database is stale or future-dated")
 
 
-def findings(report, image, require_go=False):
+def findings(report, image, go_module=None):
     if (report.get("SchemaVersion") != 2
             or report.get("ArtifactType") != "container_image"
             or report.get("ArtifactName") != image
@@ -55,12 +61,11 @@ def findings(report, image, require_go=False):
         for package in packages:
             if not isinstance(package, dict) or not isinstance(package.get("Name"), str) or not package["Name"]:
                 raise ValueError("malformed package name")
-            # Go embeds the local main module without a semantic version.
+            # Only this application's own main module may be unversioned.
             # Its stdlib and every external dependency must still be versioned.
             local_root = (kind == ("lang-pkgs", "gobinary")
                           and package.get("Relationship") == "root"
-                          and package["Name"] in ("github.com/snaraj/naranjo.online",
-                                                  "github.com/snaraj/lidersea.com"))
+                          and package["Name"] == go_module)
             if not local_root and (not isinstance(package.get("Version"), str) or not package["Version"]):
                 raise ValueError("missing dependency version")
         if kind == ("lang-pkgs", "gobinary") and not any(
@@ -77,7 +82,7 @@ def findings(report, image, require_go=False):
             row["FixedVersion"] = vuln.get("FixedVersion", "")
             rows.append(row)
     if ("os-pkgs", "debian") not in kinds or (
-            require_go and ("lang-pkgs", "gobinary") not in kinds):
+            go_module is not None and ("lang-pkgs", "gobinary") not in kinds):
         raise ValueError("incomplete application analysis")
     return rows
 
@@ -87,7 +92,7 @@ def run(root=validate.ROOT):
     # This is also required for direct local invocation, not just the workflow.
     validate.verify(root)
     _, receipt = validate.check(root)
-    if set(receipt["records"]) != GO_APPLICATIONS | RUST_APPLICATIONS:
+    if set(receipt["records"]) != set(GO_APPLICATIONS) | RUST_APPLICATIONS:
         raise ValueError("application analysis expectations are incomplete")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("TRIVY_")}
@@ -121,7 +126,7 @@ def run(root=validate.ROOT):
                     "--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL", "--exit-code", "0",
                     "--format", "json", "--output", str(output), image])
             fresh_database(metadata, dt.datetime.now(dt.timezone.utc))
-            rows = findings(json.loads(output.read_text()), image, slug in GO_APPLICATIONS)
+            rows = findings(json.loads(output.read_text()), image, GO_APPLICATIONS.get(slug))
             print(json.dumps({"application": slug, "image": image, "findings": rows}, sort_keys=True))
             rejected |= bool(rows)
         return 1 if rejected else 0

@@ -889,9 +889,9 @@ spec:
             r"/\.github/workflows/release-publisher\.yml@refs/heads/main$"])
         release = (directory / "release.yaml").read_text()
         self.assertEqual(composition.SUSPEND_LINE.findall(release), ["false"])
-        # Selected and unsuspended, but not ready: step 5 of the decision is a
-        # separate reviewed change against proven live prerequisites.
-        self.assertEqual(composition.READY_LINE.findall(release), ["false"])
+        # Selection, unsuspension and readiness land together, paired with the
+        # platform's pending-set change; the suspended reconciler is the gate.
+        self.assertEqual(composition.READY_LINE.findall(release), ["true"])
         self.assertIn("\n  serviceAccountName: helm-reconciler\n", release)
         spec_lines = composition.manifest_envelope(release.encode(), "release.yaml", slug, repository)
         self.assertEqual(composition.parse_values_block(composition.values_body(spec_lines)),
