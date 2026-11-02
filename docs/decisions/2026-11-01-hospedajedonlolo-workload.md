@@ -157,10 +157,15 @@ asserted for a repository that has published nothing.
 
 - Plain HTTP between the connector and the site inside the namespace's
   default-deny boundary, as for every site (§3).
-- The video is not delivered. The platform keeps public video delivery a
-  `NO-GO` (its ADR 0006 and safety invariant 13), so the site verifies the
-  film on its volume but answers 404 for it until the owner lifts that
-  boundary.
+- The video. The platform kept public video a `NO-GO` (its ADR 0006 and
+  safety invariant 13), so v0.1.1 answers 404 for the film. On 2026-11-02 the
+  owner decided to lift that boundary for this one file, accepting the risk
+  (snaraj/platform#432). Site v0.1.2 serves the film from its verified
+  volume, so visitors receive it only once a later reviewed change here
+  selects v0.1.2 or a successor. The edge provider's self-serve terms let it
+  limit sites that serve video without its paid video products; that would
+  limit delivery, never charge, and the answer is selecting a release that
+  withholds the film again.
 - HSTS does not protect a visitor's very first request, and preload is a
   one-way decision left to the owner.
 - `PENDING_APPLICATIONS` gains its second-ever entry. The state itself is not
