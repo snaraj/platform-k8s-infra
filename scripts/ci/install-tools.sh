@@ -18,8 +18,8 @@ install -m 0755 "$tool_dir/gitleaks" "$install_dir/gitleaks"
 elif [[ "$mode" == verify ]]; then
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
   --max-time 120 --retry 2 --output "$tool_dir/cosign" \
-  https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64
-printf '%s  %s\n' 4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71 "$tool_dir/cosign" | sha256sum --check --status
+  https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64
+printf '%s  %s\n' 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa "$tool_dir/cosign" | sha256sum --check --status
 install -m 0755 "$tool_dir/cosign" "$install_dir/cosign"
 else
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \

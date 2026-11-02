@@ -46,7 +46,7 @@ class UpdatesTests(unittest.TestCase):
         self.github = Mock()
         self.github.api.side_effect = lambda path: copy.deepcopy(self.releases[path.split("/releases/")[0][6:]])
         self.cosign = Mock()
-        self.cosign.require_pinned_version.return_value = "v3.1.3"
+        self.cosign.require_pinned_version.return_value = "v3.1.4"
         self.records = copy.deepcopy(self.receipt["records"])
 
     def advance(self, slug):
@@ -109,7 +109,7 @@ class UpdatesTests(unittest.TestCase):
             effect = lambda selection, *_: (copy.deepcopy(self.records[selection.slug]), {})
         with patch.object(updates.artifacts, "acquire", side_effect=effect) as acquire:
             result = updates.plan(self.root, self.github, object(), self.cosign,
-                                  run or Mock(return_value="Version: 1.3.4+Homebrew\n"))
+                                  run or Mock(return_value="Version: 1.3.6+Homebrew\n"))
         return result, acquire
 
     def test_current_and_drift_cover_every_application_and_compare_numerically(self):
@@ -199,7 +199,7 @@ class UpdatesTests(unittest.TestCase):
         selected, receipt = updates.validate.check(self.root)
         self.assertEqual(receipt["records"], self.records)
         self.assertEqual(selected["naranjo-online"].digest, self.records["naranjo-online"]["manifestDigest"])
-        self.assertEqual(receipt["tools"], {"cosign": "3.1.3", "oras": "1.3.4"})
+        self.assertEqual(receipt["tools"], {"cosign": "3.1.4", "oras": "1.3.6"})
 
     def test_failed_acquisition_or_changed_selected_record_prevents_plan(self):
         with self.assertRaises(updates.artifacts.Refusal):
@@ -215,9 +215,9 @@ class UpdatesTests(unittest.TestCase):
             self.plan()
         self.records["naranjo-online"]["signer"]["subject"] = self.selections["naranjo-online"].subject
         with self.assertRaisesRegex(ValueError, "ORAS"):
-            self.plan(run=Mock(return_value="Version: 1.3.3\n"))
+            self.plan(run=Mock(return_value="Version: 1.3.5\n"))
         with self.assertRaisesRegex(ValueError, "ORAS"):
-            self.plan(run=Mock(return_value="Version: 1.3.4\nVersion: 1.3.4\n"))
+            self.plan(run=Mock(return_value="Version: 1.3.6\nVersion: 1.3.6\n"))
         self.cosign.require_pinned_version.return_value = "v3.1.2"
         with self.assertRaisesRegex(ValueError, "cosign"):
             self.plan()
@@ -494,7 +494,7 @@ class ProposalFlowTests(unittest.TestCase):
         def run(argv, timeout=60):
             self.assertLessEqual(timeout, 120)
             if argv[0] == "oras":
-                return "Version: 1.3.4\n"
+                return "Version: 1.3.6\n"
             if argv == ["ssh-add", "-L"]:
                 return public + "\n"
             if argv[:2] == ["gh", "api"]:
