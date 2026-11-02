@@ -350,8 +350,6 @@ class UpdatesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unexpected paths"):
             updates.verify_delta(self.root, base, receipt_only)
 
-    # --- Pending applications never reach a proposal (issue #348) -----------
-
     def test_the_drift_check_and_plan_see_active_applications_only(self):
         """A pending application has no release to compare and none is invented.
 

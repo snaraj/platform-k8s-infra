@@ -44,10 +44,6 @@ APPLICATIONS = {"hospedajedonlolo-com": "hospedajedonlolo.com", "lidersea-com": 
 # APPLICATIONS and adds its acquisition receipt record. The two rules above are
 # opposites, so that change cannot half-land: leaving the sentinel while active
 # fails, and committing a real digest while pending fails.
-# obsync and then hospedajedonlolo.com entered here first and were promoted
-# (the latter at its first release, v0.1.1; see
-# docs/decisions/2026-11-01-hospedajedonlolo-workload.md). The map is empty
-# until the next application is admitted.
 PENDING_APPLICATIONS = {}
 
 FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml")

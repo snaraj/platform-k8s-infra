@@ -154,8 +154,6 @@ class CompositionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "fresh acquisition"):
                 composition.verify(self.root)
 
-    # --- The pending-application declaration (issue #348) -------------------
-    #
     # A third application cannot simply be appended to APPLICATIONS before its
     # publisher cuts a release: there is no acquired artifact and no receipt
     # record to point at. PENDING_APPLICATIONS is the narrower declaration that
