@@ -1,6 +1,8 @@
 """Reject drift blind spots and exercise each proposal publication boundary."""
+import contextlib
 import copy
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -348,8 +350,6 @@ class UpdatesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unexpected paths"):
             updates.verify_delta(self.root, base, receipt_only)
 
-    # --- Pending applications never reach a proposal (issue #348) -----------
-
     def test_the_drift_check_and_plan_see_active_applications_only(self):
         """A pending application has no release to compare and none is invented.
 
@@ -463,6 +463,8 @@ class ProposalFlowTests(unittest.TestCase):
         public = " ".join(private.with_suffix(".pub").read_text().split()[:2])
         native_git = updates.git
         native_git(self.root, "init", "-b", "main")
+        native_git(self.root, "config", "maintenance.auto", "false")
+        native_git(self.root, "config", "gc.auto", "0")
         native_git(self.root, "add", ".")
         native_git(self.root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                    "commit", "-m", "base")
@@ -693,6 +695,32 @@ class ProposalFlowTests(unittest.TestCase):
         self.assertEqual(steps.count("draft"), 1)
         self.assertEqual(steps.count("readback"), 1)
 
+
+class MainReportingTests(unittest.TestCase):
+    def run_main(self, error):
+        with patch.object(updates, "check_latest", side_effect=error), \
+                patch.object(updates.sys, "argv", ["updates.py", "check-latest"]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            status = updates.main()
+        return status, out.getvalue()
+
+    def test_a_refusal_prints_its_reason_on_one_line(self):
+        status, out = self.run_main(updates.artifacts.Refusal("release is not\nimmutable"))
+        self.assertEqual(status, 1)
+        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=Refusal: release is not immutable\n")
+
+    def test_a_failed_requirement_prints_its_reason(self):
+        status, out = self.run_main(ValueError("open application proposal exists"))
+        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=ValueError: open application proposal exists\n")
+
+    def test_a_long_reason_is_bounded(self):
+        status, out = self.run_main(ValueError("x" * 1000))
+        self.assertEqual(len(out.strip()), len("APPLICATION_UPDATE=UNKNOWN reason=ValueError: ") + 300)
+
+    def test_operating_system_errors_print_only_their_class(self):
+        status, out = self.run_main(OSError("cannot open /private/fixture/path"))
+        self.assertEqual(status, 1)
+        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=OSError\n")
 
 if __name__ == "__main__":
     unittest.main()

@@ -215,6 +215,7 @@ def proposal_lock(root):
 
 
 def propose(destination: Path, root=ROOT, run=command):
+    """The lock serializes proposers sharing this clone only; two clones can each open a Draft."""
     with proposal_lock(root):
         return prepare_and_publish(destination, root, run)
 
@@ -318,7 +319,10 @@ def main():
             result = check_latest()
         print(json.dumps(result, sort_keys=True))
         return 1 if result["status"] == "DRIFT" else 0
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, artifacts.Refusal) as error:
+    except (ValueError, artifacts.Refusal) as error:
+        print(f"APPLICATION_UPDATE=UNKNOWN reason={type(error).__name__}: {' '.join(str(error).split())[:300]}")
+        return 1
+    except (OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
         print(f"APPLICATION_UPDATE=UNKNOWN reason={type(error).__name__}")
         return 1
 
