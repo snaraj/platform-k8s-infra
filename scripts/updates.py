@@ -100,10 +100,10 @@ def plan(root, github, registry, cosign, run=command):
         return {}, targets
     # Receipt-v2 records the checked tool versions. Acquisition itself uses the
     # existing Python registry client; ORAS is checked for receipt compatibility.
-    require(cosign.require_pinned_version() == "v3.1.3", "cosign pin differs")
-    oras = re.findall(r"^Version:\s+(1\.3\.4)(?:\+Homebrew)?\s*$", run(["oras", "version"]), re.MULTILINE)
-    require(oras == ["1.3.4"], "ORAS compatibility pin differs")
-    updated = {**receipt, "records": records, "tools": {"cosign": "3.1.3", "oras": oras[0]},
+    require(cosign.require_pinned_version() == "v3.1.4", "cosign pin differs")
+    oras = re.findall(r"^Version:\s+(1\.3\.6)(?:\+Homebrew)?\s*$", run(["oras", "version"]), re.MULTILINE)
+    require(oras == ["1.3.6"], "ORAS compatibility pin differs")
+    updated = {**receipt, "records": records, "tools": {"cosign": "3.1.4", "oras": oras[0]},
                "capturedDate": datetime.datetime.now(datetime.timezone.utc).date().isoformat()}
     files = {validate.RECEIPT.as_posix(): artifacts.render_receipt_json(updated).encode()}
     for slug, selection in selections.items():
@@ -239,7 +239,7 @@ def prepare_and_publish(destination: Path, root, run):
             and destination.parent.is_dir() and destination.parent.resolve() == destination.parent
             and not destination.is_relative_to(root.resolve()),
             "worktree destination is not an unused ordinary location")
-    files, targets = plan(root, github, artifacts.Registry(), artifacts.Cosign(pinned_version="v3.1.3"), run)
+    files, targets = plan(root, github, artifacts.Registry(), artifacts.Cosign(pinned_version="v3.1.4"), run)
     if not files:
         return {"status": "CURRENT"}
     key = signing_key(run)
