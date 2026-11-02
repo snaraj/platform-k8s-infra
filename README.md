@@ -37,10 +37,11 @@ as a changed byte pin.
 The decision admitting obsync is
 [docs/decisions/2026-09-07-obsync-workload.md](docs/decisions/2026-09-07-obsync-workload.md).
 
-hospedajedonlolo.com is composed the same way obsync began: pending and inert.
-Its publisher has cut no release, so it is in `PENDING_APPLICATIONS` with the
-sentinel selection, a suspended and not-ready release and no receipt record,
-until one reviewed change activates it. The decision admitting it is
+hospedajedonlolo.com followed the same path: composed pending and inert, then
+activated at its first verified release, v0.1.1 (issue #86). Selection,
+unsuspension and `deploymentReady: true` landed in that one change, paired with
+the platform's removal of the namespace from its pending set; the platform's
+suspended reconciler is lifted only afterwards. The decision admitting it is
 [docs/decisions/2026-11-01-hospedajedonlolo-workload.md](docs/decisions/2026-11-01-hospedajedonlolo-workload.md).
 
 The verifier checks the allowed manifest boundary and independently reproduces

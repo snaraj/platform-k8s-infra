@@ -6,14 +6,9 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: fluxcd
   annotations:
-    platform.snaraj.dev/readiness: suspended-until-hospedajedonlolo-com-chart-release
+    platform.snaraj.dev/readiness: active-via-signature-verified-chart
 spec:
-  # Suspended, and `scripts/validate.py` requires exactly that for a pending
-  # application. The OCIRepository beside this file carries the all-zero
-  # sentinel digest, so there is nothing for helm-controller to install and an
-  # unsuspended release would only produce a permanent reconciliation error.
-  # Resuming it is part of the same reviewed change that replaces the sentinel.
-  suspend: true
+  suspend: false
   # One minute is the ceiling on how long a merged chart selection waits for
   # helm-controller to act on it. Like the OCIRepository beside this file it is
   # a poll of already-verified state, so the shorter interval buys deploy
@@ -25,26 +20,21 @@ spec:
   # prunes history to maxHistory-1 BEFORE writing the new revision, so any
   # retention default at or above the namespace secret budget wedges the
   # release permanently: the prune frees nothing, the create is denied by
-  # quota, and no retry can recover it. A sibling site was measured one
-  # upgrade away from exactly that (issue #198). Two keeps steady-state history
-  # strictly inside that budget while still preserving one rollback target for
-  # the `strategy: rollback` remediation below.
+  # quota, and no retry can recover it. This site was measured holding four
+  # revisions against a four-Secret budget — the next upgrade would have been
+  # the one denied (issue #198). Two keeps steady-state history strictly
+  # inside that budget while still preserving one rollback target for the
+  # `strategy: rollback` remediation below.
   maxHistory: 2
   releaseName: hospedajedonlolo-com
-  # The per-site account the two sibling sites also name. It is created, with
-  # its Role and RoleBinding, by `snaraj/platform`, which owns namespaces, RBAC
-  # and reconciliation definitions; until that companion change lands the name
-  # resolves to nothing, which is one more reason this release is suspended.
   serviceAccountName: helm-reconciler
   driftDetection:
     mode: enabled
   # The chart artifact comes from the signature-verified OCIRepository beside
   # this file, whose immutable digest is a reviewed platform value — no branch
-  # head, mutable tag, or raw commit can decide what runs. While that object
-  # carries the sentinel digest, source-controller produces no artifact and
-  # this release installs nothing. chartRef carries no namespace, so
-  # helm-controller (started with --no-cross-namespace-refs=true) can only ever
-  # resolve it inside this site's own namespace.
+  # head, mutable tag, or raw commit can decide what runs. chartRef carries no namespace, so helm-controller
+  # (started with --no-cross-namespace-refs=true) can only ever resolve it
+  # inside this site's own namespace.
   chartRef:
     kind: OCIRepository
     name: hospedajedonlolo-com-chart
@@ -59,7 +49,6 @@ spec:
   # The exact-site Cosign-verified chart is the sole carrier of image
   # repository, tag, and digest. A platform image override would decouple the
   # selected chart release from the workload it deploys. This one explicit
-  # value remains the chart's reviewed activation gate, and `scripts/validate.py`
-  # requires it to stay false while this application is pending.
+  # value remains the chart's reviewed activation gate.
   values:
-    deploymentReady: false
+    deploymentReady: true

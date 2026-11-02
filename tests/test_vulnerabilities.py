@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import vulnerabilities as scan
 
 IMAGE = "ghcr.io/example/application@sha256:" + "a" * 64
+LIDERSEA = "github.com/snaraj/lidersea.com"
 NOW = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
 
 
@@ -74,23 +75,48 @@ class VulnerabilityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             scan.findings(report, IMAGE)
         with self.assertRaises(ValueError):
-            scan.findings(clean(), IMAGE, require_go=True)
+            scan.findings(clean(), IMAGE, go_module=LIDERSEA)
         report = clean()
         report["Results"].append({"Class": "lang-pkgs", "Type": "gobinary",
                                   "Packages": [{"Name": "stdlib", "Version": "v1.26.10"},
                                                {"Name": "github.com/snaraj/lidersea.com", "Relationship": "root"}]})
-        self.assertEqual(scan.findings(report, IMAGE, require_go=True), [])
+        self.assertEqual(scan.findings(report, IMAGE, go_module=LIDERSEA), [])
         stdlib = report["Results"][-1]["Packages"].pop(0)
         with self.assertRaises(ValueError):
-            scan.findings(report, IMAGE, require_go=True)
+            scan.findings(report, IMAGE, go_module=LIDERSEA)
         report["Results"][-1]["Packages"].insert(0, stdlib)
         report["Results"][-1]["Packages"].append({"Name": "unversioned-third-party", "Relationship": "root"})
         with self.assertRaises(ValueError):
-            scan.findings(report, IMAGE, require_go=True)
+            scan.findings(report, IMAGE, go_module=LIDERSEA)
         report["Results"][-1]["Packages"].pop()
         report["Results"].pop(0)
         with self.assertRaises(ValueError):
-            scan.findings(report, IMAGE, require_go=True)
+            scan.findings(report, IMAGE, go_module=LIDERSEA)
+
+    def test_each_go_application_admits_only_its_own_unversioned_root(self):
+        """Review finding on #87: the selected hospedajedonlolo.com image's real
+        report names its own main module as an unversioned root. That report
+        parses; the same module in any sibling's report is refused."""
+        modules = scan.GO_APPLICATIONS
+        self.assertEqual(modules["hospedajedonlolo-com"], "github.com/snaraj/hospedajedonlolo.com")
+        for slug, own in modules.items():
+            for module in modules.values():
+                report = clean()
+                report["Results"].append({"Class": "lang-pkgs", "Type": "gobinary", "Packages": [
+                    {"Name": "stdlib", "Version": "v1.26.10", "Relationship": "direct"},
+                    {"Name": module, "Relationship": "root"}]})
+                with self.subTest(slug=slug, module=module):
+                    if module == own:
+                        self.assertEqual(scan.findings(report, IMAGE, own), [])
+                    else:
+                        with self.assertRaises(ValueError):
+                            scan.findings(report, IMAGE, own)
+        report = clean()
+        report["Results"].append({"Class": "lang-pkgs", "Type": "gobinary", "Packages": [
+            {"Name": "stdlib", "Version": "v1.26.10"},
+            {"Name": modules["hospedajedonlolo-com"], "Relationship": "direct"}]})
+        with self.assertRaises(ValueError):
+            scan.findings(report, IMAGE, modules["hospedajedonlolo-com"])
 
     def test_failed_provenance_prevents_scanner_execution(self):
         with patch.object(scan.validate, "verify", side_effect=ValueError("bad signature")), \
@@ -139,7 +165,8 @@ class VulnerabilityTests(unittest.TestCase):
                     slug = Path(args[args.index("--output") + 1]).stem
                     if slug in scan.GO_APPLICATIONS and mode != "missing-go":
                         report["Results"].append({"Class": "lang-pkgs", "Type": "gobinary",
-                            "Packages": [{"Name": "stdlib", "Version": "v1.26.10"}]})
+                            "Packages": [{"Name": "stdlib", "Version": "v1.26.10"},
+                                         {"Name": scan.GO_APPLICATIONS[slug], "Relationship": "root"}]})
                     if mode == "finding":
                         report["Results"][0]["Vulnerabilities"] = [{"VulnerabilityID": "CVE-2026-12345",
                             "PkgName": "example", "InstalledVersion": "1", "Severity": "LOW"}]
@@ -151,7 +178,7 @@ class VulnerabilityTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, "")
             with patch.object(scan.validate, "verify"), \
                     patch.object(scan.validate, "check", return_value=({}, {"records":
-                        {slug: record for slug in ("naranjo-online", "lidersea-com", "obsync")}})), \
+                        {slug: record for slug in ("naranjo-online", "lidersea-com", "obsync", "hospedajedonlolo-com")}})), \
                     patch.dict(scan.os.environ, {"TRIVY_IGNORE_UNFIXED": "true"}), \
                     patch.object(scan.subprocess, "run", side_effect=command):
                 if expected is None:
@@ -159,7 +186,7 @@ class VulnerabilityTests(unittest.TestCase):
                         scan.run()
                 else:
                     self.assertEqual(scan.run(), expected)
-            self.assertEqual(len(observed), 2 if mode == "stale" else (5 if expected is not None else 3))
+            self.assertEqual(len(observed), 2 if mode == "stale" else (6 if expected is not None else 3))
 
 
 if __name__ == "__main__":

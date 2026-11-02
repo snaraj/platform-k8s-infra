@@ -18,8 +18,8 @@ spec.loader.exec_module(artifacts)
 # ACTIVE applications: slug -> application repository. Each one has a published
 # release, an acquired artifact and an exact record in the acquisition receipt,
 # and the receipt is required to bind EXACTLY this set.
-APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.online",
-                "obsync": "obsync"}
+APPLICATIONS = {"hospedajedonlolo-com": "hospedajedonlolo.com", "lidersea-com": "lidersea.com",
+                "naranjo-online": "naranjo.online", "obsync": "obsync"}
 
 # PENDING applications: the same shape, for a workload whose publisher has not
 # cut a release yet. This is a second, NARROWER declaration rather than a third
@@ -44,10 +44,11 @@ APPLICATIONS = {"lidersea-com": "lidersea.com", "naranjo-online": "naranjo.onlin
 # APPLICATIONS and adds its acquisition receipt record. The two rules above are
 # opposites, so that change cannot half-land: leaving the sentinel while active
 # fails, and committing a real digest while pending fails.
-# obsync entered here first and was promoted. hospedajedonlolo.com is admitted
-# pending by docs/decisions/2026-11-01-hospedajedonlolo-workload.md: its
-# publisher has cut no release, so it is composed and inert until that change.
-PENDING_APPLICATIONS = {"hospedajedonlolo-com": "hospedajedonlolo.com"}
+# obsync and then hospedajedonlolo.com entered here first and were promoted
+# (the latter at its first release, v0.1.1; see
+# docs/decisions/2026-11-01-hospedajedonlolo-workload.md). The map is empty
+# until the next application is admitted.
+PENDING_APPLICATIONS = {}
 
 FILES = ("kustomization.yaml", "default-deny.yaml", "source.yaml", "release.yaml")
 # The namespace each application composes into. `obsync` is the one slug whose
