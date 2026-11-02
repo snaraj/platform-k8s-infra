@@ -860,26 +860,27 @@ spec:
                     shapes_path.write_text(shapes_source)
         composition.check(self.root)
 
-    def test_hospedajedonlolo_is_active_at_its_first_verified_release(self):
+    def test_hospedajedonlolo_is_active(self):
         """The activation decision (issue #86), read back from the manifests as literals.
 
         Nothing below is derived from the validator, so a derivation that moved
         together with a regenerated pin still disagrees with this test. The
-        digest, tag and image are the values the v0.1.1 acquisition resolved
-        after cosign verified the chart signature and the image provenance
-        against this site's own publisher. The default-deny policy is asserted
-        here because its contents are otherwise held only by the byte pin.
+        selected release is not pinned: the promoter changes only the selection
+        fields and the acquisition receipt, and `composition.check` verifies
+        them as for every active application (issue #102). The default-deny
+        policy is asserted here because its contents are otherwise held only by
+        the byte pin.
         """
 
         slug, repository = "hospedajedonlolo-com", "hospedajedonlolo.com"
-        digest = "sha256:2cd06606dbd39bab83ce86ab3f0c432afe8380e1367a92de51131d3ee7280a61"
         self.assertEqual(composition.APPLICATIONS.get(slug), repository)
         self.assertNotIn(slug, composition.PENDING_APPLICATIONS)
         self.assertEqual(composition.NAMESPACES.get(slug), slug)
         directory = self.root / "kubernetes/websites" / slug
         source = (directory / "source.yaml").read_text()
-        self.assertEqual(composition.DIGEST_LINE.findall(source), [digest])
-        self.assertIn('platform.snaraj.dev/chart-release: "0.1.1"', source)
+        versions = composition.VERSION_LINE.findall(source)
+        digests = composition.DIGEST_LINE.findall(source)
+        self.assertEqual((len(versions), len(digests)), (1, 1))
         self.assertEqual(composition.URL_LINE.findall(source),
                          ["oci://ghcr.io/snaraj/charts/hospedajedonlolo-com"])
         self.assertEqual(composition.SUBJECT_LINE.findall(source), [
@@ -897,12 +898,12 @@ spec:
         self.assertIn("\n  podSelector: {}\n  policyTypes:\n    - Ingress\n    - Egress\n",
                       (directory / "default-deny.yaml").read_text())
         selections, receipt = composition.check(self.root)
-        self.assertEqual((selections[slug].version, selections[slug].digest), ("0.1.1", digest))
+        selected = (versions[0], digests[0])
+        self.assertEqual((selections[slug].version, selections[slug].digest), selected)
         record = receipt["records"][slug]
-        self.assertEqual((record["chartTag"], record["manifestDigest"]), ("0.1.1", digest))
-        self.assertEqual(record["workloadImage"],
-                         "ghcr.io/snaraj/hospedajedonlolo-com:v0.1.1@sha256:"
-                         "0f945357b61044aec9a52c9eedaa6b1d6f894f0d24b76aa867c7494d0731d42d")
+        self.assertEqual((record["chartTag"], record["manifestDigest"]), selected)
+        self.assertRegex(record["workloadImage"],
+                         rf"^ghcr\.io/snaraj/hospedajedonlolo-com:v{re.escape(versions[0])}@sha256:[0-9a-f]{{64}}$")
 
     def test_a_pending_source_cannot_carry_another_applications_identity(self):
         """The identity tuples never couple, even with a regenerated pin.
