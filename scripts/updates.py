@@ -39,9 +39,13 @@ def command(argv, timeout=artifacts.COMMAND_TIMEOUT_SECONDS):
     return artifacts.run_command(argv, timeout=timeout, env=publication.git_environment())
 
 
+class Refused(ValueError):
+    """A proposer check failed. Its reason is a string literal in this file, so it is safe to print."""
+
+
 def require(condition, reason):
     if not condition:
-        raise ValueError(reason)
+        raise Refused(reason)
 
 
 def version(value):
@@ -136,7 +140,7 @@ def no_existing_pushurl(root):
     except subprocess.CalledProcessError as error:
         require(error.returncode == 1, "push URL configuration could not be checked")
         return
-    raise ValueError("an explicit origin push URL is already configured")
+    raise Refused("an explicit origin push URL is already configured")
 
 
 def protected_base(github):
@@ -319,10 +323,10 @@ def main():
             result = check_latest()
         print(json.dumps(result, sort_keys=True))
         return 1 if result["status"] == "DRIFT" else 0
-    except (ValueError, artifacts.Refusal) as error:
-        print(f"APPLICATION_UPDATE=UNKNOWN reason={type(error).__name__}: {' '.join(str(error).split())[:300]}")
+    except Refused as error:
+        print(f"APPLICATION_UPDATE=UNKNOWN reason=Refused: {' '.join(str(error).split())[:300]}")
         return 1
-    except (OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
+    except (ValueError, artifacts.Refusal, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
         print(f"APPLICATION_UPDATE=UNKNOWN reason={type(error).__name__}")
         return 1
 

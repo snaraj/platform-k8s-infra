@@ -1,4 +1,5 @@
 """Reject drift blind spots and exercise each proposal publication boundary."""
+import ast
 import contextlib
 import copy
 import hashlib
@@ -121,6 +122,25 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(result["status"], "DRIFT")
         self.assertEqual(result["applications"]["lidersea-com"]["version"], target)
         self.assertGreater(updates.version("0.1.100"), updates.version("0.1.99"))
+
+    def test_a_parser_error_reaches_main_without_its_rejected_value(self):
+        sentinel = "/private/SENTINEL-ONLY/capture-date"
+        path = self.root / updates.validate.RECEIPT
+        receipt = json.loads(path.read_text())
+        receipt["capturedDate"] = sentinel
+        path.write_text(json.dumps(receipt, indent=2) + "\n")
+        with self.assertRaises(ValueError) as raised:
+            updates.check_latest(self.root, self.github)
+        self.assertNotIsInstance(raised.exception, updates.Refused)
+        self.assertIn(sentinel, str(raised.exception))
+        real = updates.check_latest
+        with patch.object(updates, "check_latest", lambda: real(self.root, self.github)), \
+                patch.object(updates.sys, "argv", ["updates.py", "check-latest"]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            status = updates.main()
+        self.assertEqual(status, 1)
+        self.assertEqual(out.getvalue(), "APPLICATION_UPDATE=UNKNOWN reason=ValueError\n")
+        self.github.api.assert_not_called()
 
     def test_missing_both_apps_cannot_turn_drift_into_success(self):
         shutil.rmtree(self.root / "kubernetes")
@@ -697,6 +717,8 @@ class ProposalFlowTests(unittest.TestCase):
 
 
 class MainReportingTests(unittest.TestCase):
+    SENTINEL = "/private/SENTINEL-ONLY/value"
+
     def run_main(self, error):
         with patch.object(updates, "check_latest", side_effect=error), \
                 patch.object(updates.sys, "argv", ["updates.py", "check-latest"]), \
@@ -704,23 +726,45 @@ class MainReportingTests(unittest.TestCase):
             status = updates.main()
         return status, out.getvalue()
 
-    def test_a_refusal_prints_its_reason_on_one_line(self):
-        status, out = self.run_main(updates.artifacts.Refusal("release is not\nimmutable"))
+    def test_a_proposer_refusal_prints_its_reason_on_one_line(self):
+        status, out = self.run_main(updates.Refused("open application\nproposal exists"))
         self.assertEqual(status, 1)
-        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=Refusal: release is not immutable\n")
+        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=Refused: open application proposal exists\n")
 
-    def test_a_failed_requirement_prints_its_reason(self):
-        status, out = self.run_main(ValueError("open application proposal exists"))
-        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=ValueError: open application proposal exists\n")
+    def test_a_real_requirement_prints_its_fixed_reason(self):
+        with patch.object(updates.sys, "argv", ["updates.py", "propose", "--worktree", "relative"]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            status = updates.main()
+        self.assertEqual(status, 1)
+        self.assertEqual(out.getvalue(), "APPLICATION_UPDATE=UNKNOWN reason=Refused: worktree path must be absolute\n")
 
     def test_a_long_reason_is_bounded(self):
-        status, out = self.run_main(ValueError("x" * 1000))
-        self.assertEqual(len(out.strip()), len("APPLICATION_UPDATE=UNKNOWN reason=ValueError: ") + 300)
+        status, out = self.run_main(updates.Refused("x" * 1000))
+        self.assertEqual(len(out.strip()), len("APPLICATION_UPDATE=UNKNOWN reason=Refused: ") + 300)
 
-    def test_operating_system_errors_print_only_their_class(self):
-        status, out = self.run_main(OSError("cannot open /private/fixture/path"))
-        self.assertEqual(status, 1)
-        self.assertEqual(out, "APPLICATION_UPDATE=UNKNOWN reason=OSError\n")
+    def test_every_other_error_prints_only_its_class(self):
+        wrapped = updates.artifacts.Refusal(f"https://example.invalid{self.SENTINEL}: {OSError(self.SENTINEL)}")
+        for error in (ValueError(self.SENTINEL), wrapped, OSError(self.SENTINEL), KeyError(self.SENTINEL)):
+            with self.subTest(type(error).__name__):
+                status, out = self.run_main(error)
+                self.assertEqual(status, 1)
+                self.assertEqual(out, f"APPLICATION_UPDATE=UNKNOWN reason={type(error).__name__}\n")
+
+    def test_every_printable_reason_is_a_string_literal(self):
+        tree = ast.parse((ROOT / "scripts/updates.py").read_text())
+        inside_require = {id(node) for function in ast.walk(tree)
+                          if isinstance(function, ast.FunctionDef) and function.name == "require"
+                          for node in ast.walk(function)}
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and getattr(node.func, "id", None) in {"require", "Refused"} and id(node) not in inside_require]
+        self.assertGreater(len(calls), 40)
+        for call in calls:
+            with self.subTest(line=call.lineno):
+                self.assertEqual(len(call.args), 2 if call.func.id == "require" else 1)
+                self.assertFalse(call.keywords)
+                self.assertIsInstance(call.args[-1], ast.Constant)
+                self.assertIsInstance(call.args[-1].value, str)
+
 
 if __name__ == "__main__":
     unittest.main()
