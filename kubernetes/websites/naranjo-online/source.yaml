@@ -48,7 +48,7 @@ apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   annotations:
-    platform.snaraj.dev/chart-release: "0.1.101"
+    platform.snaraj.dev/chart-release: "0.1.102"
   name: naranjo-online-chart
   namespace: naranjo-online
 spec:
@@ -57,7 +57,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    digest: sha256:53203eba09aa404e1b4450952096883e015a153925b8f9864c5db81e3029c609
+    digest: sha256:c2282c53725fcebc9052a62a57655e285423724362785236f65eb57b84d01ff1
   timeout: 60s
   url: oci://ghcr.io/snaraj/charts/naranjo-online
   verify:
