@@ -3,17 +3,17 @@
   "capturedDate": "2026-11-03",
   "records": {
     "hospedajedonlolo-com": {
-      "arm64Digest": "sha256:34e72b80629c6320f559b4ffd9939e88826479e561178ceb061570d9dd54265d",
-      "chart": {"appVersion": "0.1.5", "name": "hospedajedonlolo-com", "version": "0.1.5"},
-      "chartConfigDigest": "sha256:d89ae3358442731b0ddeeebf23b370785df40d0e0286280a6769cd6234edf871",
-      "chartLayerDigest": "sha256:79e9d3d180da6e5652a1dee7038f2b25136e5356e88092c16836c45035f2d9d6",
+      "arm64Digest": "sha256:52e203e903aefe1d0669128a7c93c50b05facd0ad66649e060b401143f5e478b",
+      "chart": {"appVersion": "0.1.6", "name": "hospedajedonlolo-com", "version": "0.1.6"},
+      "chartConfigDigest": "sha256:c15d4b849c2f9eb3571bebadbe457c14d468b8952b396c52a72de8f04ddaa114",
+      "chartLayerDigest": "sha256:47b694eb0698855ae6f60c9612be74b4e11ba6c660bfb30938c85f524afb5055",
       "chartRepository": "ghcr.io/snaraj/charts/hospedajedonlolo-com",
-      "chartTag": "0.1.5",
-      "manifestDigest": "sha256:e8e09b68a0d6ea6b7b3f26f0510d1a290eac4334271e6b628c81c377dc93ab9f",
+      "chartTag": "0.1.6",
+      "manifestDigest": "sha256:9c97fbe23fbc51d80b6425d872e7b7bc0876174e358f1cb194cabb5ea50bfe21",
       "matchingChartLayerCount": 1,
-      "release": {"assetDigest": "sha256:c067111174727ffabc68f2a8a19b877f1074a6ad1f6fa8993771f779c90c916d", "sourceSha": "630617c4a7d60dccc41d3cf75423b6bf047f2dc3"},
+      "release": {"assetDigest": "sha256:c6f1deb3bdabc68f23d3131e992fded03d89ed4d9919ed3d40292ed09d48683d", "sourceSha": "9dc219275aac567a77738ca8bfd3fa5dc722ce1a"},
       "signer": {"issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/snaraj/hospedajedonlolo.com/.github/workflows/release-publisher.yml@refs/heads/main"},
-      "workloadImage": "ghcr.io/snaraj/hospedajedonlolo-com:v0.1.5@sha256:60a781ad946e7d072b4c0276a853a12dae85aec10d76d569293e76b6d794943e"
+      "workloadImage": "ghcr.io/snaraj/hospedajedonlolo-com:v0.1.6@sha256:eef192e1168b7e54353ce249e36dffd3c851a6519f8bf716e4e9ee779a92d764"
     },
     "lidersea-com": {
       "arm64Digest": "sha256:c88b8b8e86e2dc4da10f397ac642264f3f41b6b905d2c10197a3010cc20f9f72",
