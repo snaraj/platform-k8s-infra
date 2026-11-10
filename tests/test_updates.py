@@ -123,6 +123,80 @@ class UpdatesTests(unittest.TestCase):
         self.assertEqual(result["applications"]["lidersea-com"]["version"], target)
         self.assertGreater(updates.version("0.1.100"), updates.version("0.1.99"))
 
+    def test_drift_is_reported_in_the_job_summary_and_passes(self):
+        self.advance("lidersea-com")
+        real = updates.check_latest
+        for summary_set in (True, False):
+            with self.subTest(summary=summary_set), tempfile.TemporaryDirectory() as scratch:
+                summary = Path(scratch) / "summary.md"
+                environment = {"GITHUB_STEP_SUMMARY": str(summary)} if summary_set else {}
+                with patch.object(updates, "check_latest", lambda: real(self.root, self.github)), \
+                        patch.object(updates.sys, "argv", ["updates.py", "check-latest"]), \
+                        patch.dict(os.environ, environment, clear=True), \
+                        contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(updates.main(), 0)
+                self.assertEqual(json.loads(out.getvalue())["status"], "DRIFT")
+                if summary_set:
+                    lines = summary.read_text().splitlines()
+                    self.assertIn("scripts/updates.py propose", lines[0])
+                    self.assertEqual([line for line in lines[1:] if not line.startswith("- lidersea-com: selected ")], [])
+                    self.assertEqual(len(lines), 2)
+                else:
+                    self.assertFalse(summary.exists())
+        self.assertEqual(updates.drift_summary(updates.check_latest(self.root, self.github)).count("\n- "), 1)
+
+    def test_current_writes_no_summary(self):
+        current = updates.check_latest(self.root, self.github)
+        self.assertEqual(current["status"], "CURRENT")
+        self.assertEqual(updates.drift_summary(current), "")
+        with tempfile.TemporaryDirectory() as scratch:
+            summary = Path(scratch) / "summary.md"
+            with patch.object(updates, "check_latest", return_value=current), \
+                    patch.object(updates.sys, "argv", ["updates.py", "check-latest"]), \
+                    patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}, clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(updates.main(), 0)
+            self.assertFalse(summary.exists())
+
+    def proposals(self, statuses, numbers=None):
+        """A fake GitHub with one application-update PR per compare status."""
+        numbers = numbers or list(range(11, 11 + len(statuses)))
+        pulls = [{"number": n, "head": {"ref": f"application-update/{n}", "sha": f"{n:040x}"}}
+                 for n in numbers] + [{"number": 99, "head": {"ref": "opus5.5-high/1-other", "sha": "9" * 40}}]
+        by_head = {f"{n:040x}": status for n, status in zip(numbers, statuses)}
+
+        def run(argv, timeout=None):
+            path = argv[-1]
+            if path.endswith("pulls?state=open&per_page=100"):
+                return json.dumps(pulls)
+            self.assertIn(f"/compare/{'1' * 40}...", path)
+            return json.dumps({"status": by_head[path.rsplit("...", 1)[1]]})
+        return run
+
+    def test_open_proposals_are_current_or_stale_and_only_current_blocks(self):
+        base = "1" * 40
+        self.assertEqual(updates.open_proposals(base, self.proposals(["ahead", "diverged", "behind", "identical"])),
+                         {11: "CURRENT", 12: "STALE", 13: "STALE", 14: "CURRENT"})
+        updates.no_open_proposals(base, self.proposals([]))
+        for statuses in (["ahead"], ["identical"], ["diverged", "ahead"]):
+            with self.subTest(statuses=statuses), self.assertRaisesRegex(updates.Refused, "already needs review"):
+                updates.no_open_proposals(base, self.proposals(statuses))
+        with self.assertRaises(updates.StaleProposals) as raised:
+            updates.no_open_proposals(base, self.proposals(["diverged", "behind"], [21, 7]))
+        self.assertEqual(raised.exception.numbers, (7, 21))
+        for statuses, numbers in ((["unknown"], None), ([None], None), (["ahead"], [0])):
+            with self.subTest(statuses=statuses, numbers=numbers), self.assertRaises(updates.Refused):
+                updates.no_open_proposals(base, self.proposals(statuses, numbers))
+
+    def test_a_stale_proposal_exits_with_its_own_code_and_numbers(self):
+        with patch.object(updates, "propose", side_effect=updates.StaleProposals((7, 21))), \
+                patch.object(updates.sys, "argv", ["updates.py", "propose", "--worktree", "/absolute/new"]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(updates.main(), updates.STALE_EXIT)
+        self.assertEqual(out.getvalue(), "APPLICATION_UPDATE=STALE pulls=7,21 reason=open proposals were cut "
+                                         "from an older main; close them and propose again\n")
+        self.assertNotIn(updates.STALE_EXIT, (0, 1))
+
     def test_a_parser_error_reaches_main_without_its_rejected_value(self):
         sentinel = "/private/SENTINEL-ONLY/capture-date"
         path = self.root / updates.validate.RECEIPT
@@ -279,11 +353,11 @@ class UpdatesTests(unittest.TestCase):
 
     def test_proposals_and_key_inventory_fail_closed(self):
         run = Mock(return_value="[]")
-        updates.no_open_proposals(run)
+        updates.no_open_proposals("1" * 40, run)
         for value in ([{"head": {"ref": "application-update/existing"}}], [{}], [{}] * 100):
             run.return_value = json.dumps(value)
             with self.assertRaises(ValueError):
-                updates.no_open_proposals(run)
+                updates.no_open_proposals("1" * 40, run)
         key = "ssh-ed25519 YWJj"
         values = [json.dumps({"id": updates.OWNER, "login": "snaraj"}),
                   json.dumps([{"key": key}]), key + " fixture@example.invalid\n"]

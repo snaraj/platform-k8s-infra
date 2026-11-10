@@ -34,6 +34,29 @@ DOC_NETS = tuple(ipaddress.ip_network(s) for s in ("192.0.2.0/24", "198.51.100.0
 UUID = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?![0-9a-f])")
 OPAQUE_ID = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])")
 MAC = re.compile(r"(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])")
+# The only words a refusal prints. A reason names the rejected input's class;
+# the input itself (a path, address or email) never reaches the output.
+CATEGORIES = ("usage", "path", "size", "content", "metadata", "history", "ci",
+              "secret", "identity", "git", "environment", "other")
+
+
+class Denied(ValueError):
+    """A publication check failed; ``category`` is one of CATEGORIES."""
+
+    def __init__(self, category, reason):
+        super().__init__(reason)
+        self.category = category
+
+
+def category(error):
+    """The fixed word printed for any refusal, never the error's text."""
+    if isinstance(error, Denied):
+        return error.category
+    if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+        return "git"
+    if isinstance(error, OSError):
+        return "environment"
+    return "other"
 
 
 def git_environment():
@@ -53,13 +76,13 @@ def git(*args, root=ROOT):
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
-                raise ValueError("Git exceeded its time bound")
+                raise Denied("git", "Git exceeded its time bound")
             chunk = os.read(process.stdout.fileno(), 65536)
             if not chunk:
                 break
             output.extend(chunk)
             if len(output) > MAX_TREE:
-                raise ValueError("Git output exceeds its bound")
+                raise Denied("git", "Git output exceeds its bound")
         if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
             raise subprocess.CalledProcessError(process.returncode, command)
         return bytes(output)
@@ -72,36 +95,39 @@ def git(*args, root=ROOT):
 
 def content(payload):
     if len(payload) > MAX_BLOB or b"\0" in payload:
-        raise ValueError("opaque or oversized content")
-    text = payload.decode("utf-8")
+        raise Denied("content", "opaque or oversized content")
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Denied("content", "content is not UTF-8") from None
     if any(ord(character) < 32 and character not in "\n\r\t" for character in text):
-        raise ValueError("opaque control character")
+        raise Denied("content", "opaque control character")
     if UUID.search(text) or OPAQUE_ID.search(text) or MAC.search(text):
-        raise ValueError("private infrastructure identifier")
+        raise Denied("content", "private infrastructure identifier")
     if re.search(r"ssh-(?:ed25519|rsa)\s+[A-Za-z0-9+/]{32,}", text):
-        raise ValueError("SSH identity material")
+        raise Denied("content", "SSH identity material")
     for value in EMAIL.findall(text):
         if value not in {"39077795+snaraj@users.noreply.github.com", "noreply@github.com", "git@github.com"} and not value.endswith("@example.invalid"):
-            raise ValueError("private email")
+            raise Denied("content", "private email")
     # Patterns are assembled to keep the detector's own source publishable.
     for prefix in ("/" + "Users/", "/" + "home/", "C:" + "\\Users\\", "file:" + "///"):
         if prefix.lower() in text.lower():
-            raise ValueError("private workstation path")
+            raise Denied("content", "private workstation path")
     for value in [*IPV4.findall(text), *IPV6.findall(text)]:
         try:
             address = ipaddress.ip_address(value)
         except ValueError:
             continue
         if not address.is_loopback and not any(address in network for network in DOC_NETS if address.version == network.version):
-            raise ValueError("non-documentation network identifier")
+            raise Denied("content", "non-documentation network identifier")
 
 
 def path_allowed(path):
     parts = PurePosixPath(path).parts
     if not parts or any(part in {".", ".."} for part in parts) or PurePosixPath(path).is_absolute():
-        raise ValueError("invalid publication path")
+        raise Denied("path", "invalid publication path")
     if path not in ROOT_FILES and PATHS.fullmatch(path) is None:
-        raise ValueError("unexpected publication file")
+        raise Denied("path", "unexpected publication file")
 
 
 def snapshot(commit, root=ROOT):
@@ -112,39 +138,44 @@ def snapshot(commit, root=ROOT):
         mode, kind, oid = header.decode("ascii").split()
         path_allowed(name.decode("utf-8"))
         if mode not in {"100644", "100755"} or kind != "blob":
-            raise ValueError("non-ordinary publication file")
+            raise Denied("path", "non-ordinary publication file")
         size = int(git("cat-file", "-s", oid, root=root))
         if size > MAX_BLOB:
-            raise ValueError("oversized blob")
+            raise Denied("size", "oversized blob")
         total += size
         if total > MAX_TREE:
-            raise ValueError("oversized tree")
+            raise Denied("size", "oversized tree")
         content(git("cat-file", "blob", oid, root=root))
 
 
 def history(base, head, root=ROOT):
     if any(OID.fullmatch(value) is None for value in (base, head)) or base == head:
-        raise ValueError("invalid publication range")
+        raise Denied("history", "invalid publication range")
     if git("rev-parse", "--is-shallow-repository", root=root).strip() != b"false":
-        raise ValueError("publication history is shallow")
+        raise Denied("history", "publication history is shallow")
     grafts = git("rev-parse", "--git-path", "info/grafts", root=root).decode().strip()
     if (root / grafts).exists():
-        raise ValueError("publication history has grafts")
+        raise Denied("history", "publication history has grafts")
     git("merge-base", "--is-ancestor", base, head, root=root)
     commits = git("rev-list", "--reverse", f"{base}..{head}", root=root).decode().splitlines()
     if not 1 <= len(commits) <= 256:
-        raise ValueError("outgoing history exceeds its bound")
+        raise Denied("history", "outgoing history exceeds its bound")
     previous = base
     for commit in commits:
         parents = git("show", "-s", "--format=%P", commit, root=root).decode().split()
         if parents != [previous]:
-            raise ValueError("publication history is not linear")
+            raise Denied("history", "publication history is not linear")
         metadata = git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", commit, root=root)
-        content(metadata)
+        try:
+            content(metadata)
+        except Denied as error:
+            # Commit identity and message, not file content: a bot author or a
+            # trailer address lands here.
+            raise Denied("metadata", str(error)) from None
         snapshot(commit, root)
         previous = commit
     if previous != head:
-        raise ValueError("publication head was not scanned")
+        raise Denied("history", "publication head was not scanned")
 
 
 def working_tree(root=ROOT):
@@ -155,28 +186,31 @@ def working_tree(root=ROOT):
         path_allowed(relative)
         path = root / relative
         if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
-            raise ValueError("non-ordinary working file")
+            raise Denied("path", "non-ordinary working file")
         for parent in path.parents:
             if parent == root:
                 break
             if parent.is_symlink():
-                raise ValueError("symbolic working directory")
+                raise Denied("path", "symbolic working directory")
         if path.stat().st_size > MAX_BLOB:
-            raise ValueError("oversized working file")
+            raise Denied("size", "oversized working file")
         content(path.read_bytes())
 
 
 def secrets(base, head):
     version = subprocess.check_output(["gitleaks", "version"], timeout=10, text=True).strip().removeprefix("v")
     if version != "8.30.1":
-        raise ValueError("Gitleaks version is not pinned")
+        raise Denied("secret", "Gitleaks version is not pinned")
     with tempfile.NamedTemporaryFile() as ignore:
         common = ["--no-banner", "--no-color", "--redact", "--ignore-gitleaks-allow",
                   f"--gitleaks-ignore-path={ignore.name}", "--max-archive-depth=1", "--max-decode-depth=1",
                   "--max-target-megabytes=2", "--timeout=120", "--config", str(ROOT / "policies/gitleaks.toml")]
         for args in (["git", f"--log-opts={base}..{head}"], ["dir"]):
-            subprocess.run(["gitleaks", *args, *common, str(ROOT)], check=True, timeout=150,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=git_environment())
+            try:
+                subprocess.run(["gitleaks", *args, *common, str(ROOT)], check=True, timeout=150,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=git_environment())
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                raise Denied("secret", "Gitleaks reported a finding or did not finish") from None
 
 
 def ci_range():
@@ -184,32 +218,37 @@ def ci_range():
     if (os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
             or os.environ.get("GITHUB_REPOSITORY_ID") != REPOSITORY_ID
             or head != os.environ.get("GITHUB_SHA")):
-        raise ValueError("CI repository or checkout is not exact")
+        raise Denied("ci", "CI repository or checkout is not exact")
     if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
         number, candidate = os.environ.get("PR_NUMBER", ""), os.environ.get("PR_HEAD_SHA", "")
         if not number.isdecimal() or os.environ.get("GITHUB_REF") != f"refs/pull/{number}/merge":
-            raise ValueError("CI pull request ref is not exact")
+            raise Denied("ci", "CI pull request ref is not exact")
         base = git("rev-parse", "refs/remotes/origin/main").decode().strip()
         parents = git("show", "-s", "--format=%P", head).decode().split()
         if parents != [base, candidate] or os.environ.get("PR_BASE_REF") != "main":
-            raise ValueError("CI merge does not bind the current base and head")
+            raise Denied("ci", "CI merge does not bind the current base and head")
         event_base = os.environ.get("PR_BASE_SHA", "")
         if OID.fullmatch(event_base) is None:
-            raise ValueError("invalid event base")
+            raise Denied("ci", "invalid event base")
         git("merge-base", "--is-ancestor", event_base, base)
         return base, candidate
     if os.environ.get("GITHUB_EVENT_NAME") != "push" or os.environ.get("GITHUB_REF") != "refs/heads/main":
-        raise ValueError("unsupported publication event")
+        raise Denied("ci", "unsupported publication event")
     return os.environ.get("PUSH_BASE_SHA", ""), head
 
 
 def verify_repository():
-    raw = subprocess.check_output(["gh", "api", "-X", "GET", f"/repos/{REPOSITORY}"],
-                                  stderr=subprocess.DEVNULL, timeout=30)
-    value = json.loads(raw)
+    try:
+        raw = subprocess.check_output(["gh", "api", "-X", "GET", f"/repos/{REPOSITORY}"],
+                                      stderr=subprocess.DEVNULL, timeout=30)
+        value = json.loads(raw)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+        raise Denied("identity", "repository object could not be read") from None
+    if not isinstance(value, dict):
+        raise Denied("identity", "repository object could not be read")
     if (str(value.get("id")) != REPOSITORY_ID or value.get("full_name") != REPOSITORY
             or value.get("owner", {}).get("id") != 39077795 or value.get("private") is not False):
-        raise ValueError("repository object identity changed")
+        raise Denied("identity", "repository object identity changed")
 
 
 def main():
@@ -222,13 +261,13 @@ def main():
     try:
         if args.identity:
             if args.range or args.ci or args.secrets:
-                raise ValueError("identity check has incompatible arguments")
+                raise Denied("usage", "identity check has incompatible arguments")
             verify_repository()
             print("REPOSITORY_IDENTITY=PASS")
             return 0
         bounds = ci_range() if args.ci and not args.range else args.range
         if len(bounds) != 2:
-            raise ValueError("two immutable bounds are required")
+            raise Denied("usage", "two immutable bounds are required")
         base, head = bounds
         history(base, head)
         working_tree()
@@ -236,8 +275,8 @@ def main():
             secrets(base, head)
         print("PUBLICATION=PASS")
         return 0
-    except (OSError, ValueError, subprocess.SubprocessError):
-        print("PUBLICATION=DENY")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"PUBLICATION=DENY reason={category(error)}")
         return 1
 
 

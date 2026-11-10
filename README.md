@@ -12,9 +12,9 @@ repositories.
 | Application sources | Application code, image builds, Helm charts and signed releases |
 
 The security model is a public configuration repository for a private,
-single-owner homelab running trusted workloads. Only the owner merges protected
-changes. Flux reads Git anonymously; selected OCI artifacts are digest-bound
-and verified against each application's exact publisher identity.
+single-owner homelab running trusted workloads. Protected changes merge only as
+AGENTS.md defines. Flux reads Git anonymously; selected OCI artifacts are
+digest-bound and verified against each application's exact publisher identity.
 
 ## Application composition
 
@@ -91,8 +91,8 @@ exploit reachability or replace advisory review.
 Dependabot checks GitHub Actions updates every day at 07:31 UTC, including
 weekends. CodeQL's paired actions are grouped for both version and security
 updates. Proposals still need the repository's normal validation, independent
-review and owner merge. GitHub's advisory-driven security updates are separate
-from the scheduled version checks.
+review and the coordinator's merge. GitHub's advisory-driven security updates
+are separate from the scheduled version checks.
 
 ## Propose application updates
 
@@ -104,7 +104,8 @@ python3 -I -B scripts/updates.py check-latest
 python3 -I -B scripts/updates.py propose --worktree /absolute/new/worktree
 ```
 
-`check-latest` returns `CURRENT`, `DRIFT` or a failed `UNKNOWN` check. The
+`check-latest` returns `CURRENT`, `DRIFT` or a failed `UNKNOWN` check; `DRIFT`
+passes and lists the trailing selections in the job summary. The
 scheduled workflow also verifies the currently selected artifacts; checking
 which release is latest alone does not establish artifact authenticity.
 
@@ -122,9 +123,11 @@ repository and have no explicit push URL; the command supplies exactly one SSH
 push URL for that invocation.
 
 The result is one signed Draft PR. A distinct reviewer, successful required CI
-and an independent Ready coordinator remain mandatory; only the owner merges.
-A repository-local lock serializes proposal writers, and existing open update
-proposals block another proposal. Changed bases and
+and an independent Ready coordinator remain mandatory; the coordinator merges.
+A repository-local lock serializes proposal writers. An open proposal containing
+current `main` blocks another; one cut from an older `main` is STALE, and
+`propose` names it and exits 3 so the caller closes it and proposes again.
+Changed bases and
 partial publication fail closed: preserve the branch/worktree and inspect the
 actual PR state before retrying. The helper never rewrites or deletes refs,
 changes Ready state, installs a scheduled writer, or performs a deployment.
