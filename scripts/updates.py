@@ -32,6 +32,9 @@ EMAIL = "39077795+snaraj@users.noreply.github.com"
 NAME = "Samuel Naranjo"
 REMOTE = f"git@github.com:{REPOSITORY}.git"
 FOOTER = "- Application update proposer"
+# `propose` exits with this code when every open proposal was cut from an
+# older main: the caller closes the named PRs and proposes again.
+STALE_EXIT = 3
 
 
 def command(argv, timeout=artifacts.COMMAND_TIMEOUT_SECONDS):
@@ -41,6 +44,15 @@ def command(argv, timeout=artifacts.COMMAND_TIMEOUT_SECONDS):
 
 class Refused(ValueError):
     """A proposer check failed. Its reason is a string literal in this file, so it is safe to print."""
+
+
+class StaleProposals(Exception):
+    """Open proposals that do not contain current main; their numbers come
+    from GitHub's own PR records, so they are safe to print."""
+
+    def __init__(self, numbers):
+        super().__init__(numbers)
+        self.numbers = tuple(numbers)
 
 
 def require(condition, reason):
@@ -80,6 +92,16 @@ def check_latest(root=ROOT, github=None):
     drift = any(targets[slug]["version"] != selection.version for slug, selection in selections.items())
     return {"status": "DRIFT" if drift else "CURRENT", "applications": {
         slug: {"selected": selection.version, **targets[slug]} for slug, selection in sorted(selections.items())}}
+
+
+def drift_summary(result):
+    """Job-summary lines for a DRIFT result: which selection trails which
+    release. Slugs and versions were validated by ``latest``."""
+
+    behind = [f"- {slug}: selected {app['selected']}, latest {app['version']}"
+              for slug, app in result["applications"].items() if app["selected"] != app["version"]]
+    return ("Newer immutable application releases await a proposal "
+            "(`scripts/updates.py propose`):\n" + "\n".join(behind) + "\n") if behind else ""
 
 
 def plan(root, github, registry, cosign, run=command):
@@ -157,13 +179,37 @@ def protected_base(github):
     return sha
 
 
-def no_open_proposals(run=command):
+def open_proposals(base, run=command):
+    """Each open application-update PR, CURRENT when its head contains
+    ``base`` (verified current main) and STALE when it was cut from an older
+    main. GitHub's compare status decides; nothing the PR carries does."""
+
     pulls = gh_json("api", "-X", "GET", f"repos/{REPOSITORY}/pulls?state=open&per_page=100", run=run)
     require(isinstance(pulls, list) and len(pulls) < 100, "PR inventory exceeds its bound")
     require(all(isinstance(p, dict) and isinstance(p.get("head"), dict)
                 and isinstance(p["head"].get("ref"), str) for p in pulls), "malformed PR inventory")
-    require(not any(p["head"]["ref"].startswith("application-update/") for p in pulls),
-            "an application update already needs review")
+    states = {}
+    for pull in pulls:
+        if not pull["head"]["ref"].startswith("application-update/"):
+            continue
+        number, head = pull.get("number"), pull["head"].get("sha")
+        require(type(number) is int and number > 0 and isinstance(head, str)
+                and artifacts.SHA_RE.fullmatch(head), "malformed proposal record")
+        compared = gh_json("api", "-X", "GET", f"repos/{REPOSITORY}/compare/{base}...{head}", run=run)
+        status = compared.get("status") if isinstance(compared, dict) else None
+        require(status in {"ahead", "identical", "behind", "diverged"}, "proposal freshness could not be read")
+        states[number] = "CURRENT" if status in {"ahead", "identical"} else "STALE"
+    return states
+
+
+def no_open_proposals(base, run=command):
+    """A CURRENT proposal still needs review, so refuse as before. STALE ones
+    are reported for the caller to close; this helper never changes PR state."""
+
+    states = open_proposals(base, run)
+    require("CURRENT" not in states.values(), "an application update already needs review")
+    if states:
+        raise StaleProposals(sorted(states))
 
 
 def signing_key(run=command):
@@ -238,7 +284,7 @@ def prepare_and_publish(destination: Path, root, run):
     require(git(root, "remote", "get-url", "--push", "--all", "origin") in
             {f"https://github.com/{REPOSITORY}.git", REMOTE}, "push origin is not the destination")
     no_existing_pushurl(root)
-    no_open_proposals(run)
+    no_open_proposals(base, run)
     require(not destination.exists() and not destination.is_symlink()
             and destination.parent.is_dir() and destination.parent.resolve() == destination.parent
             and not destination.is_relative_to(root.resolve()),
@@ -280,7 +326,7 @@ def prepare_and_publish(destination: Path, root, run):
         run([sys.executable, "-I", "-B", str(destination / "scripts/publication.py"), "--secrets", base, head], timeout=120)
         clean(root, base)
         require(protected_base(github) == base, "protected main changed before publication")
-        no_open_proposals(run)
+        no_open_proposals(base, run)
         no_existing_pushurl(root)
         # Mandatory pre-push hook repeats the exact remote/main/history checks.
         # The per-command URL avoids persisting a remote or credential change.
@@ -321,8 +367,18 @@ def main():
             result = propose(args.worktree)
         else:
             result = check_latest()
+            # DRIFT is the expected signal that a site released and a proposal
+            # is due, not a verification failure: report it and pass.
+            summary = os.environ.get("GITHUB_STEP_SUMMARY")
+            if summary and result["status"] == "DRIFT":
+                with open(summary, "a", encoding="utf-8") as handle:
+                    handle.write(drift_summary(result))
         print(json.dumps(result, sort_keys=True))
-        return 1 if result["status"] == "DRIFT" else 0
+        return 0
+    except StaleProposals as error:
+        print(f"APPLICATION_UPDATE=STALE pulls={','.join(map(str, error.numbers))} "
+              "reason=open proposals were cut from an older main; close them and propose again")
+        return STALE_EXIT
     except Refused as error:
         print(f"APPLICATION_UPDATE=UNKNOWN reason=Refused: {' '.join(str(error).split())[:300]}")
         return 1

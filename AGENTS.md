@@ -12,29 +12,30 @@ prerequisites, controller authority, Git sources, reconciliation and recovery.
 - Open agent-authored PRs as Draft. A distinct reviewer inspects the exact head;
   an independent coordinator may mark Ready after checks and findings pass.
   Ready never grants merge authority.
+- A behind PR is re-cut on current `main`: a fresh branch and replacement PR,
+  never a rebase or force-push of a published branch. A re-cut needs a fresh
+  exact-head review; patch equality may narrow that review's scope to the
+  delta, never replace its receipt.
 - Security changes require focused negative tests and an independent security
   review. Documentation changes receive a proportionate review.
 - Use the owner's verified noreply identity for both commit metadata fields and
   sign every outgoing commit with the owner-authorized signing key. Do not
   change shared Git identity settings or add co-author trailers.
-- Keep credentials, inventory, private operational evidence and workstation
-  details outside this repository, including commit messages and PR bodies.
-- Before every push, scan the exact outgoing history and working tree for
-  secrets and private data. Do not bypass hooks, scans, checks or review.
+- Keep credentials, inventory, private evidence and workstation details out of
+  the repository, commits and PR bodies, and scan the exact outgoing history and
+  tree for them before every push. Never bypass hooks, scans, checks or review.
 
 ## Application boundary
 
-- Only declared application directories may contribute manifests, and the
-  declaration is two exact maps in `scripts/validate.py`, never a pattern.
-  Each directory contains one default-deny NetworkPolicy, OCIRepository and
-  HelmRelease. `APPLICATIONS` is the ACTIVE set: it has published releases,
-  acquired artifacts, and the acquisition receipt must bind exactly it.
-  `PENDING_APPLICATIONS` is the narrower set for a workload whose publisher
-  has cut no release: its directory is inventoried and byte-pinned, its
-  selection may be ONLY the fail-closed sentinel digest, its release must be
-  suspended and not ready, it contributes no receipt record, and no proposal
-  may write its paths. Promotion is one reviewed change that moves an entry
-  between the maps and adds its receipt record; a place is never reserved.
+- Only application directories declared in two exact maps in
+  `scripts/validate.py`, never a pattern, may contribute manifests; each holds
+  one default-deny NetworkPolicy, OCIRepository and HelmRelease. `APPLICATIONS`
+  is the ACTIVE set, with published releases, acquired artifacts and a receipt
+  binding exactly it. `PENDING_APPLICATIONS` holds a workload whose publisher
+  has cut no release: inventoried, byte-pinned, selecting ONLY the fail-closed
+  sentinel digest, release suspended and not ready, no receipt record, no
+  proposal writing its paths. Promotion moves an entry between the maps with its
+  receipt record in one reviewed change; no place is reserved.
 - Preserve the complete application source/chart/image/publisher identity.
   Select immutable digests and independently verify acquisition evidence.
 - Default-deny policies move with application composition. Namespace creation,
@@ -42,22 +43,20 @@ prerequisites, controller authority, Git sources, reconciliation and recovery.
 - Never add credentials to Git or give Flux a Git credential or write access.
 - Reject public Kubernetes entry points, host networking, storage activation,
   unknown resources, cross-namespace references and arbitrary Helm values.
-- Production changes use the reviewed source and the existing reconcilers.
-  Repository creation does not activate it as a production source. A live
-  source move requires reviewed platform changes and current convergence and
-  rollback evidence; never introduce parallel application reconcilers.
+- Production changes use the reviewed source and the existing reconcilers. A
+  live source move requires reviewed platform changes with current convergence
+  and rollback evidence; never introduce parallel application reconcilers.
 - Adding a workload or expanding a trust boundary requires a new reviewed
   threat-model decision. Workloads are currently trusted and owner-operated.
 
 ## CI and evidence
 
-PR jobs are secretless with read-only default permissions, pinned actions and
-tools, disabled checkout credential persistence, and GitHub-hosted runners.
-Required checks validate manifest boundaries, acquired artifact identities,
-history and privacy. No source-release publisher or cluster credential belongs
-here. Source activation requires current proof that acquisition verification,
-CI and repository protections pass. Repository content alone does not prove
-live reconciliation or workload health.
+PR jobs are secretless, read-only by default and GitHub-hosted, with pinned
+actions and tools and no persisted checkout credential. Required checks validate
+manifest boundaries, artifact identities, history and privacy; no source-release
+publisher or cluster credential belongs here. Activating a source requires
+current proof that acquisition verification, CI and protections pass. Repository
+content alone never proves live reconciliation or workload health.
 
 ## Generated application proposals
 

@@ -104,7 +104,8 @@ python3 -I -B scripts/updates.py check-latest
 python3 -I -B scripts/updates.py propose --worktree /absolute/new/worktree
 ```
 
-`check-latest` returns `CURRENT`, `DRIFT` or a failed `UNKNOWN` check. The
+`check-latest` returns `CURRENT`, `DRIFT` or a failed `UNKNOWN` check; `DRIFT`
+passes and lists the trailing selections in the job summary. The
 scheduled workflow also verifies the currently selected artifacts; checking
 which release is latest alone does not establish artifact authenticity.
 
@@ -123,8 +124,10 @@ push URL for that invocation.
 
 The result is one signed Draft PR. A distinct reviewer, successful required CI
 and an independent Ready coordinator remain mandatory; only the owner merges.
-A repository-local lock serializes proposal writers, and existing open update
-proposals block another proposal. Changed bases and
+A repository-local lock serializes proposal writers. An open proposal containing
+current `main` blocks another; one cut from an older `main` is STALE, and
+`propose` names it and exits 3 so the caller closes it and proposes again.
+Changed bases and
 partial publication fail closed: preserve the branch/worktree and inspect the
 actual PR state before retrying. The helper never rewrites or deletes refs,
 changes Ready state, installs a scheduled writer, or performs a deployment.

@@ -1,5 +1,8 @@
 """Exercise real Git history, including material removed before the tip."""
+import ast
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -13,7 +16,9 @@ publication = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publication)
 
 
-class PublicationTests(unittest.TestCase):
+class Repository(unittest.TestCase):
+    """A disposable repository; holds no tests of its own."""
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -32,6 +37,8 @@ class PublicationTests(unittest.TestCase):
         self.git("commit", "--allow-empty", "-m", message)
         return self.git("rev-parse", "HEAD")
 
+
+class PublicationTests(Repository):
     def test_valid_closed_tree_and_linear_range_pass(self):
         (self.root / "README.md").write_text("Public configuration.\n")
         head = self.commit("add public configuration")
@@ -55,8 +62,13 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "workstation"):
             publication.history(self.base, head, self.root)
 
+    # An address in RFC 2544's benchmarking range: reserved for tests, never a
+    # LAN or public host, and outside the documentation allowlist, so the
+    # scanner must still refuse it. Assembled so this file stays publishable.
+    BENCHMARK_ADDRESS = "198.18." + "0.1"
+
     def test_private_commit_metadata_is_scanned(self):
-        head = self.commit("device=" + "192.168." + "77.39")
+        head = self.commit("device=" + self.BENCHMARK_ADDRESS)
         with self.assertRaisesRegex(ValueError, "network identifier"):
             publication.history(self.base, head, self.root)
 
@@ -70,7 +82,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_replace_refs_cannot_hide_an_intermediate_tree(self):
         path = self.root / "README.md"
-        path.write_text("device=" + "192.168." + "77.39")
+        path.write_text("device=" + self.BENCHMARK_ADDRESS)
         unsafe = self.commit("intermediate")
         path.write_text("Public configuration.\n")
         head = self.commit("clean candidate")
@@ -144,6 +156,76 @@ class PublicationTests(unittest.TestCase):
             with self.subTest(field=key), patch.object(publication.subprocess, "check_output", return_value=json.dumps(dict(good, **{key: value})).encode()):
                 with self.assertRaisesRegex(ValueError, "object identity"):
                     publication.verify_repository()
+
+
+class RefusalReasonTests(Repository):
+    """Every refusal prints one fixed category word, never the rejected input."""
+
+    SENTINEL = "sentinel-" + "private@" + "example.com"
+
+    def deny(self, action, *patches):
+        with contextlib.ExitStack() as stack:
+            for target in patches:
+                stack.enter_context(target)
+            try:
+                action()
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                return publication.category(error)
+        self.fail("the action was not refused")
+
+    def test_each_refusal_class_prints_its_category(self):
+        (self.root / "README.md").write_text("Public configuration.\n")
+        clean = self.commit("clean")
+        metadata = self.commit("note " + self.SENTINEL)
+        self.git("checkout", "-q", "-b", "side", self.base)
+        unrelated = self.commit("unrelated")
+        cases = {
+            "path": lambda: publication.path_allowed("unexpected.txt"),
+            "size": (lambda: publication.snapshot(clean, self.root), patch.object(publication, "MAX_BLOB", 4)),
+            "content": lambda: publication.content(self.SENTINEL.encode()),
+            "metadata": lambda: publication.history(clean, metadata, self.root),
+            "history": lambda: publication.history(clean, clean, self.root),
+            "ci": (publication.ci_range, patch.dict(os.environ, {"GITHUB_REPOSITORY": "foreign/repository"}, clear=True),
+                   patch.object(publication, "git", lambda *args, **kwargs: b"0" * 40)),
+            "secret": (lambda: publication.secrets(self.base, clean),
+                       patch.object(publication.subprocess, "check_output", return_value="v8.30.1\n"),
+                       patch.object(publication.subprocess, "run",
+                                    side_effect=subprocess.CalledProcessError(1, ["gitleaks"]))),
+            "identity": (publication.verify_repository,
+                         patch.object(publication.subprocess, "check_output", return_value=b"[]")),
+            "git": lambda: publication.history(unrelated, clean, self.root),
+            "environment": (lambda: publication.secrets(self.base, clean),
+                            patch.object(publication.subprocess, "check_output", side_effect=FileNotFoundError)),
+            "other": lambda: int("not a size"),
+        }
+        self.assertEqual(set(cases) | {"usage"}, set(publication.CATEGORIES))
+        for expected, case in cases.items():
+            action, *patches = case if isinstance(case, tuple) else (case,)
+            with self.subTest(expected):
+                self.assertEqual(self.deny(action, *patches), expected)
+
+    def test_main_prints_the_category_and_never_the_input(self):
+        head = self.commit("note " + self.SENTINEL)
+        real_git = publication.git
+        for argv, expected in ((["publication.py", self.base, head], "PUBLICATION=DENY reason=metadata\n"),
+                               (["publication.py", "--identity", self.base], "PUBLICATION=DENY reason=usage\n"),
+                               (["publication.py", self.base], "PUBLICATION=DENY reason=usage\n")):
+            with self.subTest(argv=argv), patch("sys.argv", argv), \
+                    patch.object(publication, "git", lambda *args, **kwargs: real_git(*args, root=self.root)), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(publication.main(), 1)
+            self.assertEqual(out.getvalue(), expected)
+            self.assertNotIn("sentinel", out.getvalue())
+
+    def test_every_refusal_names_a_fixed_category(self):
+        tree = ast.parse((Path(publication.__file__)).read_text())
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.func.id == "Denied"]
+        self.assertGreater(len(calls), 30)
+        for call in calls:
+            self.assertIsInstance(call.args[0], ast.Constant)
+            self.assertIn(call.args[0].value, publication.CATEGORIES)
+        self.assertNotIn("ValueError(", (Path(publication.__file__)).read_text())
 
 
 if __name__ == "__main__":
