@@ -48,7 +48,7 @@ apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
   annotations:
-    platform.snaraj.dev/chart-release: "0.1.6"
+    platform.snaraj.dev/chart-release: "0.1.7"
   name: hospedajedonlolo-com-chart
   namespace: hospedajedonlolo-com
 spec:
@@ -57,7 +57,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    digest: sha256:9c97fbe23fbc51d80b6425d872e7b7bc0876174e358f1cb194cabb5ea50bfe21
+    digest: sha256:e35c475612dee68da90ca218eacbb9dea3cf2eab8b8335333700423c9d54398c
   timeout: 60s
   url: oci://ghcr.io/snaraj/charts/hospedajedonlolo-com
   verify:
