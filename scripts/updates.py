@@ -340,7 +340,7 @@ def prepare_and_publish(destination: Path, root, run):
                 f"Base: `{base}`\nHead: `{head}`\n\n" +
                 "\n".join(f"- {slug}: `{target['version']}` (Release `{target['releaseId']}`)" for slug, target in sorted(targets.items())) +
                 "\n\nValidation: composition and tests, fresh artifact verification, signed commit and complete outgoing-history privacy/secret checks passed.\n\n"
-                "Only chart selection fields and the complete acquisition receipt change. Independent exact-head review, required hosted checks and coordinator Ready remain required; the coordinator merges once it is current, green and approved at its exact head. Repository selection is not live deployment evidence.\n")
+                "Only chart selection fields and the complete acquisition receipt change. Independent exact-head review, required hosted checks and coordinator Ready remain required; the owner alone merges. Repository selection is not live deployment evidence.\n")
         body_file = Path(temporary) / "body.md"
         body_file.write_text(body)
         url = run(["gh", "pr", "create", "--repo", REPOSITORY, "--base", "main", "--head", branch,

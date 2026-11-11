@@ -7,16 +7,15 @@ prerequisites, controller authority, Git sources, reconciliation and recovery.
 
 ## Authority and publication
 
-- The owner alone pushes `main`, creates tags, rewrites history or deletes
-  remote refs. Agents author signed changes on isolated task branches.
+- The owner alone merges or pushes `main`, creates tags, rewrites history or
+  deletes remote refs. Agents author signed changes on isolated task branches.
 - Open agent-authored PRs as Draft. A distinct reviewer inspects the exact head;
-  the coordinator marks Ready and merges (squash) a PR current with `main`,
-  green and App-approved at that head, then drives delivery (owner direction,
-  2026-11-03). Authors and reviewers never merge.
-- Re-cut a behind PR on current `main` (fresh branch and PR, never a rebase or
-  force-push). It keeps its review only if the App's latest receipt approves a
-  head GitHub recorded for the old PR, whole-file `git patch-id --verbatim` from
-  each merge base matches, and every required check is green at the new head.
+  an independent coordinator may mark Ready after checks and findings pass.
+  Ready never grants merge authority.
+- A behind PR is re-cut on current `main`: a fresh branch and replacement PR,
+  never a rebase or force-push of a published branch. A re-cut needs a fresh
+  exact-head review; patch equality may narrow that review's scope to the
+  delta, never replace its receipt.
 - Security changes require focused negative tests and an independent security
   review. Documentation changes receive a proportionate review.
 - Use the owner's verified noreply identity for both commit metadata fields and
